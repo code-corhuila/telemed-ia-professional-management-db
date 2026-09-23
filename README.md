@@ -1,20 +1,43 @@
 # telemed-ia-professional-management-db
 
-> professional-management bounded context: database (schema, seeds, migrations)
+> TeleMed IA Professional Management bounded context: database schema, migrations, seed
+> data, and database tests.
 
-Part of the **LMS Library** distributed system — team `lms-library`, Grupo 2.
-Governance and documentation live in [`library-docs`](https://github.com/code-corhuila/library-docs).
+This repository belongs to the **TeleMed IA** distributed system and contains only the
+database implementation for the Professional Management bounded context. Project
+documentation and governance live in [`telemed-ia-docs`](https://github.com/code-corhuila/telemed-ia-docs).
 
 ## Database scope
 
-This repository contains only the PostgreSQL schema and initial catalog seeds for the Professional
-Management bounded context. It contains the `specialties` and `professionals` tables;
+This repository contains the PostgreSQL schema, Liquibase migrations/changelog, initial seed data,
+and database tests for the Professional Management bounded context. It contains the `specialties`
+and `professionals` tables;
 `identity_user_id` is
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
 
 Migrations use Liquibase and are defined in
 [`db/changelog/db.changelog-master.yaml`](db/changelog/db.changelog-master.yaml).
+
+The initial specialty catalog remains in two seed changesets because the existing Liquibase
+history is retained without destructive changes. The execution order is intentional:
+`002-seed-specialties.sql` adds the first four specialties, `003-create-professionals.sql`
+creates the dependent table, and `004-seed-additional-specialties.sql` completes the catalog
+with the remaining three specialties. Together they provide the seven expected specialties
+without duplicating seed data.
+
+## Specialty lifecycle and delete policy
+
+An administrator may create and edit specialties. An administrator may physically delete a
+specialty only when no professionals are associated with it. If professionals reference the
+specialty, PostgreSQL prevents the deletion through the
+`professionals.specialty_id -> specialties.id` foreign key. This is an intentional
+`NO ACTION`/restrictive policy; `ON DELETE CASCADE` is not used, so deleting a specialty can
+never delete professionals automatically.
+
+If the business later needs to retire a specialty that already has associated professionals,
+an explicit deprecation or deactivation mechanism must be defined. This repository does not
+implement an API delete operation.
 
 ## Running schema tests
 
@@ -56,4 +79,4 @@ branch into another: `merge develop -> qa` and `merge qa -> main` do not exist i
 `main` requires **1 approval from `ariel5253`**. On `develop` and `qa` the team sets its own review
 rule.
 
-Full policy: `00-governance/branching-policy.md` in `library-docs`.
+Full policy: `00-governance/branching-policy.md` in `telemed-ia-docs`.
