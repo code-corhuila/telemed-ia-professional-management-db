@@ -8,3 +8,6 @@ VALUES
     ('Dermatología', 'Atención de enfermedades de piel, cabello y uñas.'),
     ('Cardiología', 'Atención de enfermedades cardiovasculares.')
 ON CONFLICT (name) DO NOTHING;
+
+--rollback DELETE FROM specialties
+--rollback WHERE name IN ('Medicina General', 'Pediatría', 'Dermatología', 'Cardiología');
