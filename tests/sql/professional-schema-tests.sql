@@ -118,6 +118,27 @@ BEGIN
     END IF;
 
     SELECT COUNT(*) INTO actual_count
+    FROM pg_constraint
+    WHERE conrelid = 'public.professionals'::regclass
+      AND contype = 'f'
+      AND (
+          confrelid = to_regclass('public.identity_users')
+          OR confrelid::regclass::text ILIKE '%identity%'
+      );
+    IF actual_count <> 0 THEN
+        RAISE EXCEPTION 'Unexpected cross-context foreign key from professionals to Identity';
+    END IF;
+
+    SELECT COUNT(*) INTO actual_count
+    FROM pg_indexes
+    WHERE schemaname = 'public'
+      AND tablename = 'professionals'
+      AND indexname = 'idx_professionals_specialty_id';
+    IF actual_count <> 1 THEN
+        RAISE EXCEPTION 'Expected index idx_professionals_specialty_id';
+    END IF;
+
+    SELECT COUNT(*) INTO actual_count
     FROM specialties
     WHERE (name, description) IN (
         ('Medicina General', 'Atención médica general y orientación inicial.'),
@@ -137,6 +158,54 @@ BEGIN
     IF actual_count <> 7 THEN
         RAISE EXCEPTION 'Expected no specialties beyond the seven bounded-context seeds';
     END IF;
+
+    INSERT INTO specialties (name, description)
+    VALUES ('Prueba eliminación libre', 'Specialty used to verify safe deletion.');
+
+    DELETE FROM specialties
+    WHERE name = 'Prueba eliminación libre';
+
+    IF EXISTS (
+        SELECT 1
+        FROM specialties
+        WHERE name = 'Prueba eliminación libre'
+    ) THEN
+        RAISE EXCEPTION 'A specialty without professionals should be deletable';
+    END IF;
+
+    INSERT INTO specialties (name, description)
+    VALUES ('Prueba eliminación protegida', 'Specialty used to verify FK protection.')
+    RETURNING id INTO actual_count;
+
+    INSERT INTO professionals (
+        identity_user_id,
+        license_number,
+        specialty_id,
+        years_experience
+    )
+    VALUES (900000001, 'TEST-SAFE-DELETE-001', actual_count, 0);
+
+    BEGIN
+        DELETE FROM specialties
+        WHERE name = 'Prueba eliminación protegida';
+        RAISE EXCEPTION 'A specialty with professionals should not be deletable';
+    EXCEPTION
+        WHEN foreign_key_violation THEN
+            NULL;
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM professionals
+        WHERE license_number = 'TEST-SAFE-DELETE-001'
+    ) THEN
+        RAISE EXCEPTION 'Professional must remain after protected specialty deletion';
+    END IF;
+
+    DELETE FROM professionals
+    WHERE license_number = 'TEST-SAFE-DELETE-001';
+    DELETE FROM specialties
+    WHERE name = 'Prueba eliminación protegida';
 END;
 $$;
 
