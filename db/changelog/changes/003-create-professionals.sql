@@ -11,3 +11,8 @@ CREATE TABLE professionals (
     CONSTRAINT fk_professionals_specialty
         FOREIGN KEY (specialty_id) REFERENCES specialties (id)
 );
+
+CREATE INDEX idx_professionals_specialty_id
+    ON professionals (specialty_id);
+
+--rollback DROP INDEX idx_professionals_specialty_id;
