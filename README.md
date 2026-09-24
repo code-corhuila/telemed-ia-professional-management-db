@@ -16,6 +16,10 @@ and `professionals` tables;
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
 
+An existing `professionals` row represents an active professional. This bounded context does
+not currently define professional lifecycle states, soft deletion, or normal administrator
+deletion of professionals. The catalog administration scope is `specialties`.
+
 Migrations use Liquibase and are defined in
 [`db/changelog/db.changelog-master.yaml`](db/changelog/db.changelog-master.yaml).
 
@@ -28,16 +32,13 @@ without duplicating seed data.
 
 ## Specialty lifecycle and delete policy
 
-An administrator may create and edit specialties. An administrator may physically delete a
-specialty only when no professionals are associated with it. If professionals reference the
-specialty, PostgreSQL prevents the deletion through the
-`professionals.specialty_id -> specialties.id` foreign key. This is an intentional
-`NO ACTION`/restrictive policy; `ON DELETE CASCADE` is not used, so deleting a specialty can
-never delete professionals automatically.
+An administrator may create and edit specialties. An administrator may delete a specialty only when no professionals are associated with it.
+This is a hard delete, not a soft delete. If professionals reference the specialty, PostgreSQL
+rejects the deletion through the `professionals.specialty_id -> specialties.id` foreign key.
+The FK explicitly uses `ON DELETE RESTRICT`; deleting a specialty can never delete professionals
+automatically.
 
-If the business later needs to retire a specialty that already has associated professionals,
-an explicit deprecation or deactivation mechanism must be defined. This repository does not
-implement an API delete operation.
+This repository does not implement an API delete operation.
 
 ## Running schema tests
 
