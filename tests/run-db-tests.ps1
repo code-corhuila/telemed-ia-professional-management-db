@@ -12,6 +12,7 @@ if ([string]::IsNullOrWhiteSpace($ComposeCommand)) {
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repositoryRoot 'docker-compose.test.yml'
 $projectName = 'professional-management-db-test'
+$env:PGPASSWORD = 'test_password'
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw 'Docker Desktop is required to run the database tests.'
@@ -50,8 +51,11 @@ try {
         'run', '--rm',
         '--name', $testContainer,
         '--entrypoint', 'psql',
+        '-e', 'PGPASSWORD',
         'postgres',
-        '--dbname=postgresql://test_user:test_password@postgres:5432/professional_management_test',
+        '--host=postgres',
+        '--username=test_user',
+        '--dbname=professional_management_test',
         '--file=/tests/professional-schema-tests.sql'
     )
 } finally {
