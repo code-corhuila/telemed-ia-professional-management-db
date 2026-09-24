@@ -9,7 +9,7 @@ CREATE TABLE professionals (
     years_experience INTEGER CONSTRAINT nn_professionals_years_experience NOT NULL DEFAULT 0,
     CONSTRAINT ck_professionals_years_experience_nonnegative CHECK (years_experience >= 0),
     CONSTRAINT fk_professionals_specialty
-        FOREIGN KEY (specialty_id) REFERENCES specialties (id)
+        FOREIGN KEY (specialty_id) REFERENCES specialties (id) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_professionals_specialty_id
