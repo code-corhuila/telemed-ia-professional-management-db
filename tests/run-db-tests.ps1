@@ -1,65 +1,115 @@
 [CmdletBinding()]
-param(
-    [string]$ComposeCommand = $env:COMPOSE_CMD
-)
+param()
 
 $ErrorActionPreference = 'Stop'
-
-if ([string]::IsNullOrWhiteSpace($ComposeCommand)) {
-    $ComposeCommand = 'docker compose'
-}
-
-$repositoryRoot = Split-Path -Parent $PSScriptRoot
-$composeFile = Join-Path $repositoryRoot 'docker-compose.test.yml'
-$projectName = 'professional-management-db-test'
-$env:PGPASSWORD = 'test_password'
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw 'Docker Desktop is required to run the database tests.'
 }
 
-$portInUse = Get-NetTCPConnection -LocalPort 5432 -State Listen -ErrorAction SilentlyContinue
-if ($null -eq $portInUse) {
-    $env:TEST_DB_PORT = '5432'
-} else {
-    $env:TEST_DB_PORT = '55432'
-    Write-Warning 'Local port 5432 is in use; exposing the testing database on 55432 instead.'
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$composeFile = Join-Path $repositoryRoot 'docker-compose.test.yml'
+$projectName = "professional-db-test-$PID-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+$composeArgs = @('-p', $projectName, '-f', $composeFile)
+$previousPassword = $env:TEST_DB_PASSWORD
+$passwordBytes = New-Object byte[] 32
+$random = [Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $random.GetBytes($passwordBytes)
+} finally {
+    $random.Dispose()
 }
+$env:TEST_DB_PASSWORD = [BitConverter]::ToString($passwordBytes).Replace('-', '')
 
 function Invoke-Compose {
     param([string[]]$Arguments)
 
-    if ($ComposeCommand -eq 'docker compose') {
-        & docker compose @Arguments
-    } else {
-        & $ComposeCommand @Arguments
-    }
+    & docker compose @composeArgs @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Docker Compose command failed with exit code $LASTEXITCODE."
+        throw "Docker Compose failed with exit code $LASTEXITCODE."
     }
 }
 
-Push-Location $repositoryRoot
-try {
-    Invoke-Compose @('-p', $projectName, '-f', $composeFile, 'up', '-d', 'postgres')
-    Invoke-Compose @('-p', $projectName, '-f', $composeFile, 'run', '--rm', 'liquibase')
+function Invoke-Liquibase {
+    param([string[]]$Command)
 
-    $testContainer = "$projectName-test-runner"
-    Invoke-Compose @(
-        '-p', $projectName,
-        '-f', $composeFile,
-        'run', '--rm',
-        '--name', $testContainer,
-        '--entrypoint', 'psql',
-        '-e', 'PGPASSWORD',
-        'postgres',
-        '--host=postgres',
-        '--username=test_user',
-        '--dbname=professional_management_test',
-        '--file=/tests/professional-schema-tests.sql'
-    )
-} finally {
-    Pop-Location
+    Invoke-Compose (@('run', '--rm', 'liquibase') + $Command)
 }
 
-Write-Host 'Professional Management database tests passed in Docker.'
+function Invoke-Sql {
+    param([string]$Query)
+
+    $result = & docker compose @composeArgs exec -T postgres psql -X -qAt -v ON_ERROR_STOP=1 `
+        -U test_user -d professional_management_test -c $Query
+    if ($LASTEXITCODE -ne 0) {
+        throw 'PostgreSQL assertion query failed.'
+    }
+    return ($result -join '').Trim()
+}
+
+function Assert-Sql {
+    param([string]$Query, [string]$Message)
+
+    if ((Invoke-Sql $Query) -ne 't') {
+        throw $Message
+    }
+}
+
+function Assert-Schema {
+    Invoke-Compose @(
+        'exec', '-T', 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+        '-U', 'test_user', '-d', 'professional_management_test',
+        '-f', '/tests/professional-schema-tests.sql'
+    )
+}
+
+$failure = $null
+Write-Host "Using isolated Docker Compose project: $projectName"
+try {
+    Invoke-Compose @('up', '-d', 'postgres')
+
+    Invoke-Liquibase @('update')
+    Assert-Schema
+    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 4' 'Fresh update did not apply four changesets.'
+
+    $appliedBefore = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
+    Invoke-Liquibase @('update')
+    $appliedAfter = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
+    if ($appliedAfter -ne $appliedBefore) {
+        throw 'Repeated update applied additional changesets.'
+    }
+
+    Invoke-Liquibase @('rollback-count', '4')
+    Assert-Sql "SELECT to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL" `
+        'Domain tables remain after complete rollback.'
+    Assert-Sql "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')) = 0" `
+        'Unexpected domain tables remain after complete rollback.'
+    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 0' 'Liquibase changeset history remains after rollback.'
+
+    Invoke-Liquibase @('update')
+    Assert-Schema
+    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 4' 'Reapplication did not restore all changesets.'
+} catch {
+    $failure = $_
+} finally {
+    try {
+        Invoke-Compose @('down', '--volumes', '--remove-orphans')
+    } catch {
+        if ($null -eq $failure) {
+            $failure = $_
+        } else {
+            Write-Warning "Docker cleanup also failed: $_"
+        }
+    }
+    if ($null -eq $previousPassword) {
+        Remove-Item Env:\TEST_DB_PASSWORD -ErrorAction SilentlyContinue
+    } else {
+        $env:TEST_DB_PASSWORD = $previousPassword
+    }
+}
+
+if ($null -ne $failure) {
+    throw $failure
+}
+
+Write-Host 'Fresh install, idempotent update, full rollback, and reapplication passed.'
