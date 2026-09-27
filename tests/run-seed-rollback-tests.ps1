@@ -6,7 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $id = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $network = "seed-rollback-$id"
 $container = "$network-postgres"
-$databases = @('fresh', 'full', 'collision002', 'collision004', 'legacy', 'fk' |
+$databases = @('fresh', 'full', 'collision002', 'collision004', 'legacy', 'fk', 'admindelete' |
     ForEach-Object { "seed_${_}_$id" })
 $scratchRoot = Join-Path $env:TEMP $network
 $legacyRoot = Join-Path $scratchRoot 'legacy'
@@ -91,10 +91,16 @@ try {
     if (-not $ready) { throw 'Disposable PostgreSQL did not become ready.' }
 
     $fresh = $databases[0]; NewDb $fresh; L $fresh @('update'); L $fresh @('validate')
-    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id IN ('001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties'))=5" 'Expected five changesets.'
+    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id IN ('001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership'))=6" 'Expected six changesets.'
     Seven $fresh; Own $fresh '002-seed-specialties' 4; Own $fresh '004-seed-additional-specialties' 3
     Schema $fresh
+    L $fresh @('update')
+    A $fresh '(SELECT count(*) FROM databasechangelog)=6' 'Second update applied additional changesets.'
+    Seven $fresh; Own $fresh '002-seed-specialties' 4; Own $fresh '004-seed-additional-specialties' 3
+    Write-Host 'PASS second update is idempotent.'
 
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "(SELECT count(*) FROM specialties)=7" 'Ownership FK changeset rollback changed specialty data.'
     L $fresh @('rollback-count','--count','1')
     A $fresh "(SELECT count(*) FROM specialties)=4" 'Rollback 004 did not retain 002 rows.'
     Own $fresh '004-seed-additional-specialties' 0; Own $fresh '002-seed-specialties' 4
@@ -112,13 +118,13 @@ try {
     Schema $fresh
     Write-Host 'PASS fresh apply, ownership, staged rollbacks, reapply, and schema tests.'
 
-    $full = $databases[1]; NewDb $full; L $full @('update'); L $full @('rollback-count','--count','5')
+    $full = $databases[1]; NewDb $full; L $full @('update'); L $full @('rollback-count','--count','6')
     A $full "to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL" 'Full rollback left domain tables.'
-    A $full "(SELECT count(*) FROM databasechangelog WHERE id IN ('001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties'))=0" 'Full rollback left changeset history.'
+    A $full "(SELECT count(*) FROM databasechangelog WHERE id IN ('001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership'))=0" 'Full rollback left changeset history.'
     L $full @('update'); Seven $full
     Own $full '002-seed-specialties' 4; Own $full '004-seed-additional-specialties' 3
     Schema $full
-    Write-Host 'PASS rollback-count=5, table/history removal, reapply, and schema tests.'
+    Write-Host 'PASS rollback-count=6, table/history removal, reapply, and schema tests.'
 
     Collision $databases[2] 'Medicina General' "'Medicina General'" '002-seed-specialties' 3 1 2
     Collision $databases[3] 'Neurología' $neurology '004-seed-additional-specialties' 2 5 4
@@ -132,6 +138,8 @@ try {
     A $legacy "to_regclass('public.specialty_seed_ownership') IS NOT NULL AND (SELECT count(*) FROM specialty_seed_ownership)=0" 'Legacy rows were backfilled.'
     Seven $legacy
     L $legacy @('rollback-count','--count','1')
+    A $legacy "to_regclass('public.specialty_seed_ownership') IS NOT NULL" 'Ownership policy rollback unexpectedly removed the ledger.'
+    L $legacy @('rollback-count','--count','1')
     A $legacy "to_regclass('public.specialty_seed_ownership') IS NULL" 'Legacy ledger should roll back first.'
     L $legacy @('rollback-count','--count','1'); Seven $legacy
     L $legacy @('rollback-count','--count','1'); L $legacy @('rollback-count','--count','1'); Seven $legacy
@@ -141,15 +149,33 @@ try {
     $neurologyId = Scalar $fk "SELECT id FROM specialties WHERE name=$neurology"
     P $fk "INSERT INTO professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000001,'TEST-OWNERSHIP-FK-001',$neurologyId,0)"
     $dockerArgs = @('run','--rm','--network',$network,'--workdir','/liquibase/changelog','--mount',"type=bind,source=$root\db\changelog,target=/liquibase/changelog,readonly",'liquibase/liquibase:4.31',"--url=jdbc:postgresql://${container}:5432/$fk",'--username=test_user',"--password=$password",'--changelog-file=db.changelog-master.yaml','rollback-count','--count','1')
+    $dockerArgs[-1] = '2'
     $oldEap = $ErrorActionPreference
     try { $ErrorActionPreference='Continue'; $failure = & docker @dockerArgs 2>&1; $exit = $LASTEXITCODE } finally { $ErrorActionPreference=$oldEap }
     if ($exit -eq 0 -or ($failure -join "`n") -notmatch 'fk_professionals_specialty') { throw 'Expected FK-restricted rollback failure.' }
     A $fk "EXISTS (SELECT 1 FROM professionals WHERE license_number='TEST-OWNERSHIP-FK-001')" 'Professional was deleted.'
     A $fk "EXISTS (SELECT 1 FROM specialties WHERE id=$neurologyId)" 'Referenced specialty was deleted.'
+    A $fk "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Failed seed rollback should leave the ownership FK migration rolled back.'
     Own $fk '004-seed-additional-specialties' 3
     P $fk "DELETE FROM professionals WHERE license_number='TEST-OWNERSHIP-FK-001'"
     L $fk @('rollback-count','--count','1'); Own $fk '004-seed-additional-specialties' 0
     Write-Host 'PASS FK restriction preserves professional, specialty, and ownership until retry.'
+
+    $adminDelete = $databases[6]; NewDb $adminDelete; L $adminDelete @('update'); Schema $adminDelete
+    A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='c')=1" 'Ownership FK must cascade only its metadata row.'
+    A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_professionals_specialty' AND confdeltype='r')=1" 'Professional FK must remain restrictive.'
+    $ownedId = Scalar $adminDelete "SELECT id FROM specialties WHERE name=$neurology"
+    P $adminDelete "DELETE FROM specialties WHERE id=$ownedId"
+    Own $adminDelete '004-seed-additional-specialties' 2
+    A $adminDelete "NOT EXISTS (SELECT 1 FROM specialties WHERE id=$ownedId)" 'Administrator-deleted specialty remains.'
+    $adminId = Scalar $adminDelete "INSERT INTO specialties(name,description) VALUES ($neurology,'administrator replacement') RETURNING id"
+    if ($adminId -eq $ownedId) { throw 'Replacement specialty unexpectedly reused the deleted ID.' }
+    L $adminDelete @('rollback-count','--count','1')
+    A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Ownership FK rollback must restore NO ACTION.'
+    L $adminDelete @('rollback-count','--count','1'); Own $adminDelete '004-seed-additional-specialties' 0
+    A $adminDelete "EXISTS (SELECT 1 FROM specialties WHERE id=$adminId AND name=$neurology AND description='administrator replacement')" 'Seed rollback deleted the administrator replacement.'
+    A $adminDelete "(SELECT count(*) FROM specialties)=5" 'Seed rollback left unexpected specialty rows.'
+    Write-Host 'PASS unused specialty deletion cascades metadata only; seed rollback preserves administrator replacement.'
 } finally {
     $oldEap = $ErrorActionPreference
     try {
