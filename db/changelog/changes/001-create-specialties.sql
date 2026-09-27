@@ -6,3 +6,5 @@ CREATE TABLE specialties (
     name VARCHAR(100) CONSTRAINT uq_specialties_name NOT NULL UNIQUE,
     description VARCHAR(500)
 );
+
+--rollback DROP TABLE specialties;
