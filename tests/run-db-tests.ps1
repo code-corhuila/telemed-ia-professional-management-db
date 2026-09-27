@@ -1,9 +1,20 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$ComposeCommand = $env:COMPOSE_CMD
+)
 
 $ErrorActionPreference = 'Stop'
 
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+if ([string]::IsNullOrWhiteSpace($ComposeCommand)) {
+    $ComposeCommand = 'docker compose'
+}
+
+if ($ComposeCommand -eq 'docker compose') {
+    $composeAvailable = Get-Command docker -ErrorAction SilentlyContinue
+} else {
+    $composeAvailable = Get-Command $ComposeCommand -ErrorAction SilentlyContinue
+}
+if (-not $composeAvailable) {
     throw 'Docker Desktop is required to run the database tests.'
 }
 
@@ -24,7 +35,11 @@ $env:TEST_DB_PASSWORD = [BitConverter]::ToString($passwordBytes).Replace('-', ''
 function Invoke-Compose {
     param([string[]]$Arguments)
 
-    & docker compose @composeArgs @Arguments
+    if ($ComposeCommand -eq 'docker compose') {
+        & docker compose @composeArgs @Arguments
+    } else {
+        & $ComposeCommand @composeArgs @Arguments
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Docker Compose failed with exit code $LASTEXITCODE."
     }
@@ -39,8 +54,10 @@ function Invoke-Liquibase {
 function Invoke-Sql {
     param([string]$Query)
 
-    $result = & docker compose @composeArgs exec -T postgres psql -X -qAt -v ON_ERROR_STOP=1 `
-        -U test_user -d professional_management_test -c $Query
+    $result = Invoke-Compose (@(
+        'exec', '-T', 'postgres', 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1',
+        '--host=127.0.0.1', '-U', 'test_user', '-d', 'professional_management_test', '-c', $Query
+    ))
     if ($LASTEXITCODE -ne 0) {
         throw 'PostgreSQL assertion query failed.'
     }
@@ -58,6 +75,7 @@ function Assert-Sql {
 function Assert-Schema {
     Invoke-Compose @(
         'exec', '-T', 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+        '--host=127.0.0.1',
         '-U', 'test_user', '-d', 'professional_management_test',
         '-f', '/tests/professional-schema-tests.sql'
     )
@@ -73,7 +91,10 @@ try {
     Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 4' 'Fresh update did not apply four changesets.'
 
     $appliedBefore = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
-    Invoke-Liquibase @('update')
+    $secondUpdate = Invoke-Liquibase @('update') | Out-String
+    if ($secondUpdate -notmatch '(?m)^\s*Run:\s+0\s*$') {
+        throw 'Repeated Liquibase update did not report zero changesets.'
+    }
     $appliedAfter = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
     if ($appliedAfter -ne $appliedBefore) {
         throw 'Repeated update applied additional changesets.'

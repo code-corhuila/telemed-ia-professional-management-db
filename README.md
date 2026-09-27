@@ -54,6 +54,9 @@ Docker Desktop is required. Liquibase and `psql` run inside PostgreSQL/Liquibase
 they do not need to be installed locally. Each execution uses a unique Compose project, an empty
 database volume, and a generated disposable password. It validates a fresh migration, a no-op
 second update, complete rollback, and reapplication with the schema assertions.
+The runner explicitly selects each Liquibase action; the Compose service's default action is
+`update`. PostgreSQL and Liquibase receive the generated password through environment variables,
+and test `psql` connections use that password over TCP.
 
 ```powershell
 .\tests\run-db-tests.ps1
