@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - include:
+      file: 03_tables/003-create-professionals.sql
+      relativeToChangelogFile: true
+      logicalFilePath: changes/003-create-professionals.sql
+  - include:
+      file: 04_constraints/005-cascade-deleted-specialty-ownership.sql
+      relativeToChangelogFile: true
+      logicalFilePath: changes/005-cascade-deleted-specialty-ownership.sql

@@ -1,1 +1,3 @@
+# Reserved for future TCL changesets (transaction, recovery, and release-tag material).
+# This database currently has no TCL operations to manage.
 databaseChangeLog: []

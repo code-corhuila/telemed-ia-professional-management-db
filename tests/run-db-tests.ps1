@@ -23,6 +23,7 @@ $composeFile = Join-Path $repositoryRoot 'docker-compose.test.yml'
 $projectName = "professional-db-test-$PID-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
 $composeArgs = @('-p', $projectName, '-f', $composeFile)
 $previousPassword = $env:TEST_DB_PASSWORD
+$previousUser = $env:TEST_DB_USER
 $passwordBytes = New-Object byte[] 32
 $random = [Security.Cryptography.RandomNumberGenerator]::Create()
 try {
@@ -31,6 +32,7 @@ try {
     $random.Dispose()
 }
 $env:TEST_DB_PASSWORD = [BitConverter]::ToString($passwordBytes).Replace('-', '')
+$env:TEST_DB_USER = 'test_user'
 
 function Invoke-Compose {
     param([string[]]$Arguments)
@@ -56,7 +58,8 @@ function Invoke-Sql {
 
     $result = Invoke-Compose (@(
         'exec', '-T', '-e', "PGPASSWORD=$env:TEST_DB_PASSWORD", 'postgres', 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1',
-        '--host=127.0.0.1', '-U', 'test_user', '-d', 'professional_management_test', '-c', $Query
+        '--host=127.0.0.1', '-U', $env:TEST_DB_USER,
+        '-d', 'professional_management_test', '-c', $Query
     ))
     if ($LASTEXITCODE -ne 0) {
         throw 'PostgreSQL assertion query failed.'
@@ -75,8 +78,8 @@ function Assert-Sql {
 function Assert-Schema {
     Invoke-Compose @(
         'exec', '-T', '-e', "PGPASSWORD=$env:TEST_DB_PASSWORD", 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
-        '--host=127.0.0.1',
-        '-U', 'test_user', '-d', 'professional_management_test',
+        '--host=127.0.0.1', '-U', $env:TEST_DB_USER,
+        '-d', 'professional_management_test',
         '-f', '/tests/professional-schema-tests.sql'
     )
 }
@@ -91,8 +94,8 @@ try {
         throw 'Fresh Liquibase update did not report its changeset count.'
     }
     $expectedChangesets = [int]$Matches[1]
-    if ($expectedChangesets -lt 1) {
-        throw 'Fresh Liquibase update did not apply any changesets.'
+    if ($expectedChangesets -ne 6) {
+        throw "Expected six changesets, but Liquibase reported $expectedChangesets."
     }
 
     Assert-Schema
@@ -110,11 +113,12 @@ try {
     }
 
     Invoke-Liquibase @('rollback-count', "$expectedChangesets")
-    Assert-Sql "SELECT to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL" `
+    Assert-Sql "SELECT to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL" `
         'Domain tables remain after complete rollback.'
     Assert-Sql "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')) = 0" `
         'Unexpected domain tables remain after complete rollback.'
-    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 0' 'Liquibase changeset history remains after rollback.'
+    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 0' `
+        'Liquibase changeset history remains after rollback.'
 
     $reapplication = Invoke-Liquibase @('update') | Out-String
     if ($reapplication -notmatch '(?m)^\s*Run:\s+(\d+)\s*$' -or [int]$Matches[1] -ne $expectedChangesets) {
@@ -139,6 +143,11 @@ try {
         Remove-Item Env:\TEST_DB_PASSWORD -ErrorAction SilentlyContinue
     } else {
         $env:TEST_DB_PASSWORD = $previousPassword
+    }
+    if ($null -eq $previousUser) {
+        Remove-Item Env:\TEST_DB_USER -ErrorAction SilentlyContinue
+    } else {
+        $env:TEST_DB_USER = $previousUser
     }
 }
 
