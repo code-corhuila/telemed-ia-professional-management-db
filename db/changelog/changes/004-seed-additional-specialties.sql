@@ -8,5 +8,4 @@ VALUES
     ('Ortopedia', 'Atención de enfermedades y lesiones del sistema musculoesquelético.')
 ON CONFLICT (name) DO NOTHING;
 
---rollback DELETE FROM specialties
---rollback WHERE name IN ('Neurología', 'Ginecología', 'Ortopedia');
+--rollback SELECT 1;

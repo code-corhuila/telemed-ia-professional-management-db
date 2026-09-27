@@ -9,5 +9,4 @@ VALUES
     ('Cardiología', 'Atención de enfermedades cardiovasculares.')
 ON CONFLICT (name) DO NOTHING;
 
---rollback DELETE FROM specialties
---rollback WHERE name IN ('Medicina General', 'Pediatría', 'Dermatología', 'Cardiología');
+--rollback SELECT 1;
