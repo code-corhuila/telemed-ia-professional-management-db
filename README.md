@@ -51,21 +51,20 @@ This repository does not implement an API delete operation.
 ## Running schema tests
 
 Docker Desktop is required. Liquibase and `psql` run inside PostgreSQL/Liquibase containers, so
-they do not need to be installed locally. Each execution uses a unique Compose project, an empty
-database volume, and a generated disposable password. It validates a fresh migration, a no-op
-second update, complete rollback, and reapplication with the schema assertions.
-The runner explicitly selects each Liquibase action; the Compose service's default action is
-`update`. PostgreSQL and Liquibase receive the generated password through environment variables,
-and test `psql` connections use that password over TCP.
+they do not need to be installed locally. Each execution creates a unique Compose project and a
+fresh database with a generated disposable password. The runner prints the project name when it
+starts. It applies the Liquibase changelog, checks a second update is a no-op, performs a complete
+rollback, verifies the database state, and reapplies the changesets with schema assertions.
+Liquibase actions are selected explicitly by the runner.
 
 ```powershell
 .\tests\run-db-tests.ps1
 ```
 
-This script uses the Compose project `professional-management-db-test`, starts only its own
-PostgreSQL container, runs Liquibase, and executes the SQL tests with the PostgreSQL image's
-`psql`. If local port 5432 is occupied, it automatically exposes the test database on 55432
-instead; container-to-container communication always uses the private Compose network.
+The runner removes only the containers, network, and volume belonging to its generated project
+in a `finally` block, including when a test fails. It restores the previous
+`TEST_DB_PASSWORD` environment value. The test project does not publish a host port or reuse
+resources from another run.
 
 The permanent seed rollback test script validates ownership, collision handling, checksums, and
 full rollback/reapplication:
@@ -74,15 +73,29 @@ full rollback/reapplication:
 .\tests\run-seed-rollback-tests.ps1
 ```
 
-The runner removes only the containers, network, and volume belonging to its unique Compose
-project in a finally block, including when a test fails. It does not publish a host port or
-reuse Docker resources from previous executions. The Compose file and script do not reference
-production or monolith databases.
+The automated runner cleans up its generated project when it exits. If a separate environment
+was started manually with the `professional-management-db-test` project name, stop that named
+environment with:
 
-Containers, networks, and volumes created by this script are disposable and are cleaned up when
-the test run finishes. The separate schema test environment can be stopped with:
-
+```powershell
 docker compose -p professional-management-db-test -f docker-compose.test.yml down
+```
+
+## Manual debugging
+
+While the automated test is running, use the generated project name printed by the runner to
+inspect that run's database. The runner cleans it up when it exits. To keep a separate database
+available for manual inspection, use the `professional-db-debug` project below. Run the commands
+in order, exit the interactive `psql` session with `\q`, then run the cleanup commands.
+
+```powershell
+$env:TEST_DB_PASSWORD = [Guid]::NewGuid().ToString('N')
+docker compose -p professional-db-debug -f docker-compose.test.yml up -d postgres
+docker compose -p professional-db-debug -f docker-compose.test.yml run --rm liquibase update
+docker compose -p professional-db-debug -f docker-compose.test.yml exec -T postgres psql -U test_user -d professional_management_test
+docker compose -p professional-db-debug -f docker-compose.test.yml down --volumes --remove-orphans
+Remove-Item Env:\TEST_DB_PASSWORD
+```
 
 ## Branching
 

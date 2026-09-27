@@ -86,9 +86,18 @@ Write-Host "Using isolated Docker Compose project: $projectName"
 try {
     Invoke-Compose @('up', '-d', 'postgres')
 
-    Invoke-Liquibase @('update')
+    $firstUpdate = Invoke-Liquibase @('update') | Out-String
+    if ($firstUpdate -notmatch '(?m)^\s*Run:\s+(\d+)\s*$') {
+        throw 'Fresh Liquibase update did not report its changeset count.'
+    }
+    $expectedChangesets = [int]$Matches[1]
+    if ($expectedChangesets -lt 1) {
+        throw 'Fresh Liquibase update did not apply any changesets.'
+    }
+
     Assert-Schema
-    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 4' 'Fresh update did not apply four changesets.'
+    Assert-Sql "SELECT (SELECT count(*) FROM databasechangelog) = $expectedChangesets" `
+        'Fresh update did not apply all reported changesets.'
 
     $appliedBefore = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
     $secondUpdate = Invoke-Liquibase @('update') | Out-String
@@ -100,16 +109,20 @@ try {
         throw 'Repeated update applied additional changesets.'
     }
 
-    Invoke-Liquibase @('rollback-count', '4')
+    Invoke-Liquibase @('rollback-count', "$expectedChangesets")
     Assert-Sql "SELECT to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL" `
         'Domain tables remain after complete rollback.'
     Assert-Sql "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')) = 0" `
         'Unexpected domain tables remain after complete rollback.'
     Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 0' 'Liquibase changeset history remains after rollback.'
 
-    Invoke-Liquibase @('update')
+    $reapplication = Invoke-Liquibase @('update') | Out-String
+    if ($reapplication -notmatch '(?m)^\s*Run:\s+(\d+)\s*$' -or [int]$Matches[1] -ne $expectedChangesets) {
+        throw 'Reapplication did not run the complete changeset set.'
+    }
     Assert-Schema
-    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 4' 'Reapplication did not restore all changesets.'
+    Assert-Sql "SELECT (SELECT count(*) FROM databasechangelog) = $expectedChangesets" `
+        'Reapplication did not restore all changesets.'
 } catch {
     $failure = $_
 } finally {
