@@ -50,9 +50,10 @@ This repository does not implement an API delete operation.
 
 ## Running schema tests
 
-Docker Desktop is required. The test Compose file starts PostgreSQL 16 with the database
-`professional_management_test`, user `test_user`, and password `test_password`. Liquibase and
-`psql` both run inside containers, so they do not need to be installed locally.
+Docker Desktop is required. Liquibase and `psql` run inside PostgreSQL/Liquibase containers, so
+they do not need to be installed locally. Each execution uses a unique Compose project, an empty
+database volume, and a generated disposable password. It validates a fresh migration, a no-op
+second update, complete rollback, and reapplication with the schema assertions.
 
 ```powershell
 .\tests\run-db-tests.ps1
@@ -70,14 +71,15 @@ full rollback/reapplication:
 .\tests\run-seed-rollback-tests.ps1
 ```
 
+The runner removes only the containers, network, and volume belonging to its unique Compose
+project in a finally block, including when a test fails. It does not publish a host port or
+reuse Docker resources from previous executions. The Compose file and script do not reference
+production or monolith databases.
+
 Containers, networks, and volumes created by this script are disposable and are cleaned up when
 the test run finishes. The separate schema test environment can be stopped with:
 
-```powershell
 docker compose -p professional-management-db-test -f docker-compose.test.yml down
-```
-
-The Compose file and script do not reference production or monolith databases.
 
 ## Branching
 
