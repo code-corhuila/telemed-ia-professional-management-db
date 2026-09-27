@@ -15,5 +15,4 @@ CREATE TABLE professionals (
 CREATE INDEX idx_professionals_specialty_id
     ON professionals (specialty_id);
 
---rollback DROP INDEX idx_professionals_specialty_id;
 --rollback DROP TABLE professionals;
