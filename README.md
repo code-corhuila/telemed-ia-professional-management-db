@@ -21,14 +21,20 @@ not currently define professional lifecycle states, soft deletion, or normal adm
 deletion of professionals. The catalog administration scope is `specialties`.
 
 Migrations use Liquibase and are defined in
-[`db/changelog/db.changelog-master.yaml`](db/changelog/db.changelog-master.yaml).
+[`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single changelog entry
+point. DDL and DML are organized under `01_ddl/` and `02_dml/`; empty DCL and TCL changelogs keep
+the family structure ready without defining unused roles, grants, or transaction operations.
+Migration SQL retains inline rollback definitions, so no separate file-based rollback scripts
+are currently needed.
 
-The initial specialty catalog remains in two seed changesets because the existing Liquibase
-history is retained without destructive changes. The execution order is intentional:
-`002-seed-specialties.sql` adds the first four specialties, `003-create-professionals.sql`
-creates the dependent table, and `004-seed-additional-specialties.sql` completes the catalog
-with the remaining three specialties. Together they provide the seven expected specialties
-without duplicating seed data.
+The DDL family creates `specialties` before `professionals`; the DML family then applies the
+two specialty seed changesets. Together they provide seven specialties without duplicating seed
+data. Moved SQL retains its previous Liquibase logical file path so deployed changesets are
+recognized without changing their checksums or execution history.
+
+The domain PostgreSQL deployment configuration is [`deploy/compose.yml`](deploy/compose.yml).
+Copy `.env.example` to `.env` and set the database name, user, password, and optional port before
+starting it. `.env` is ignored by Git.
 
 Specialty seed changesets record ownership only for rows they actually insert. Pre-existing
 specialties skipped by `ON CONFLICT` are never claimed. Fresh databases can roll back seed-created
