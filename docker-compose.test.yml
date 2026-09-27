@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: professional_management_test
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d professional_management_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - ./tests/sql:/tests:ro
+    ports:
+      - "${TEST_DB_PORT:-5432}:5432"
+
+  liquibase:
+    image: liquibase/liquibase:4.31
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /liquibase/changelog
+    volumes:
+      - ./db/changelog:/liquibase/changelog:ro
+    command:
+      - --url=jdbc:postgresql://postgres:5432/professional_management_test
+      - --username=test_user
+      - --password=test_password
+      - --changelog-file=db.changelog-master.yaml
+      - update
