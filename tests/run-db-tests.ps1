@@ -55,7 +55,7 @@ function Invoke-Sql {
     param([string]$Query)
 
     $result = Invoke-Compose (@(
-        'exec', '-T', 'postgres', 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1',
+        'exec', '-T', '-e', "PGPASSWORD=$env:TEST_DB_PASSWORD", 'postgres', 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1',
         '--host=127.0.0.1', '-U', 'test_user', '-d', 'professional_management_test', '-c', $Query
     ))
     if ($LASTEXITCODE -ne 0) {
@@ -74,7 +74,7 @@ function Assert-Sql {
 
 function Assert-Schema {
     Invoke-Compose @(
-        'exec', '-T', 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+        'exec', '-T', '-e', "PGPASSWORD=$env:TEST_DB_PASSWORD", 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
         '--host=127.0.0.1',
         '-U', 'test_user', '-d', 'professional_management_test',
         '-f', '/tests/professional-schema-tests.sql'

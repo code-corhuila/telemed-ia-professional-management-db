@@ -55,7 +55,8 @@ they do not need to be installed locally. Each execution creates a unique Compos
 fresh database with a generated disposable password. The runner prints the project name when it
 starts. It applies the Liquibase changelog, checks a second update is a no-op, performs a complete
 rollback, verifies the database state, and reapplies the changesets with schema assertions.
-Liquibase actions are selected explicitly by the runner.
+The runner explicitly selects every Liquibase action. PostgreSQL and Liquibase receive the
+generated password through environment variables, and test `psql` connects over TCP.
 
 ```powershell
 .\tests\run-db-tests.ps1
@@ -89,11 +90,12 @@ available for manual inspection, use the `professional-db-debug` project below. 
 in order, exit the interactive `psql` session with `\q`, then run the cleanup commands.
 
 ```powershell
+$debugProject = "professional-db-debug-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
 $env:TEST_DB_PASSWORD = [Guid]::NewGuid().ToString('N')
-docker compose -p professional-db-debug -f docker-compose.test.yml up -d postgres
-docker compose -p professional-db-debug -f docker-compose.test.yml run --rm liquibase update
-docker compose -p professional-db-debug -f docker-compose.test.yml exec -T postgres psql -U test_user -d professional_management_test
-docker compose -p professional-db-debug -f docker-compose.test.yml down --volumes --remove-orphans
+docker compose -p $debugProject -f docker-compose.test.yml up -d postgres
+docker compose -p $debugProject -f docker-compose.test.yml run --rm liquibase update
+docker compose -p $debugProject -f docker-compose.test.yml exec -T -e "PGPASSWORD=$env:TEST_DB_PASSWORD" postgres psql -U test_user -d professional_management_test
+docker compose -p $debugProject -f docker-compose.test.yml down --volumes --remove-orphans
 Remove-Item Env:\TEST_DB_PASSWORD
 ```
 
