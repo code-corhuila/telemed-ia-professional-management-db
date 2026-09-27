@@ -3,33 +3,26 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: professional_management_test
-      POSTGRES_USER: test_user
-      POSTGRES_PASSWORD: test_password
+      POSTGRES_USER: ${TEST_DB_USER:?TEST_DB_USER must be set}
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD:?TEST_DB_PASSWORD must be set}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U test_user -d professional_management_test"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
       timeout: 5s
       retries: 30
     volumes:
       - ./tests/sql:/tests:ro
-    ports:
-      - "${TEST_DB_PORT:-5432}:5432"
 
   liquibase:
     image: liquibase/liquibase:4.31
     depends_on:
       postgres:
         condition: service_healthy
-    working_dir: /liquibase
+    working_dir: /workspace
     volumes:
-      - ./changelog:/liquibase/changelog:ro
-      - ./01_ddl:/liquibase/01_ddl:ro
-      - ./02_dml:/liquibase/02_dml:ro
-      - ./03_dcl:/liquibase/03_dcl:ro
-      - ./04_tcl:/liquibase/04_tcl:ro
-    command:
-      - --url=jdbc:postgresql://postgres:5432/professional_management_test
-      - --username=test_user
-      - --password=test_password
-      - --changelog-file=changelog/changelog-master.yaml
-      - update
+      - .:/workspace:ro
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:postgresql://postgres:5432/professional_management_test
+      LIQUIBASE_COMMAND_USERNAME: ${TEST_DB_USER:?TEST_DB_USER must be set}
+      LIQUIBASE_COMMAND_PASSWORD: ${TEST_DB_PASSWORD:?TEST_DB_PASSWORD must be set}
+      LIQUIBASE_COMMAND_CHANGELOG_FILE: changelog/changelog-master.yaml

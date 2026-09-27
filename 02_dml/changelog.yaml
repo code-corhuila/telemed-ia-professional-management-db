@@ -2,6 +2,8 @@ databaseChangeLog:
   - include:
       file: 00_inserts/002-seed-specialties.sql
       relativeToChangelogFile: true
+      logicalFilePath: changes/002-seed-specialties.sql
   - include:
       file: 00_inserts/004-seed-additional-specialties.sql
       relativeToChangelogFile: true
+      logicalFilePath: changes/004-seed-additional-specialties.sql
