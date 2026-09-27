@@ -30,6 +30,10 @@ creates the dependent table, and `004-seed-additional-specialties.sql` completes
 with the remaining three specialties. Together they provide the seven expected specialties
 without duplicating seed data.
 
+Specialty seeds are reference/catalog data. Rolling back changeset 002 or 004 intentionally
+preserves its rows so a rollback cannot delete pre-existing catalog entries. A complete schema
+rollback still removes the catalog when changeset 001 drops the `specialties` table.
+
 ## Specialty lifecycle and delete policy
 
 An administrator may create and edit specialties. An administrator may delete a specialty only when no professionals are associated with it.
@@ -50,10 +54,17 @@ Docker Desktop is required. The test Compose file starts PostgreSQL 16 with the 
 .\tests\run-db-tests.ps1
 ```
 
-The script uses the Compose project `professional-management-db-test`, starts only its own
+This script uses the Compose project `professional-management-db-test`, starts only its own
 PostgreSQL container, runs Liquibase, and executes the SQL tests with the PostgreSQL image's
 `psql`. If local port 5432 is occupied, it automatically exposes the test database on 55432
 instead; container-to-container communication always uses the private Compose network.
+
+Seed rollback ownership, full rollback, and reapplication can be validated in a disposable
+Docker network with:
+
+```powershell
+.\tests\run-seed-rollback-tests.ps1
+```
 
 To stop and remove only this testing environment:
 
