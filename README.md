@@ -34,7 +34,7 @@ Specialty seed changesets record ownership only for rows they actually insert. P
 specialties skipped by `ON CONFLICT` are never claimed. Fresh databases can roll back seed-created
 rows, while legacy rows remain unowned and are preserved because historical ownership cannot be
 inferred. A complete reverse-order schema rollback eventually removes the catalog when changeset
-001 drops the `specialties` table. No `CASCADE` is used.
+001 drops the `specialties` table.
 
 ## Specialty lifecycle and delete policy
 
@@ -42,7 +42,9 @@ An administrator may create and edit specialties. An administrator may delete a 
 This is a hard delete, not a soft delete. If professionals reference the specialty, PostgreSQL
 rejects the deletion through the `professionals.specialty_id -> specialties.id` foreign key.
 The FK explicitly uses `ON DELETE RESTRICT`; deleting a specialty can never delete professionals
-automatically.
+automatically. The seed ownership FK uses `ON DELETE CASCADE` only to remove its metadata row when
+an unused specialty is deleted; seed rollback then has no ownership record for that row and cannot
+delete a later administrator-created specialty with the same name.
 
 This repository does not implement an API delete operation.
 
