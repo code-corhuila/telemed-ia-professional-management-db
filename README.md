@@ -30,9 +30,11 @@ creates the dependent table, and `004-seed-additional-specialties.sql` completes
 with the remaining three specialties. Together they provide the seven expected specialties
 without duplicating seed data.
 
-Specialty seeds are reference/catalog data. Rolling back changeset 002 or 004 intentionally
-preserves its rows so a rollback cannot delete pre-existing catalog entries. A complete schema
-rollback still removes the catalog when changeset 001 drops the `specialties` table.
+Specialty seed changesets record ownership only for rows they actually insert. Pre-existing
+specialties skipped by `ON CONFLICT` are never claimed. Fresh databases can roll back seed-created
+rows, while legacy rows remain unowned and are preserved because historical ownership cannot be
+inferred. A complete reverse-order schema rollback eventually removes the catalog when changeset
+001 drops the `specialties` table. No `CASCADE` is used.
 
 ## Specialty lifecycle and delete policy
 
@@ -59,14 +61,15 @@ PostgreSQL container, runs Liquibase, and executes the SQL tests with the Postgr
 `psql`. If local port 5432 is occupied, it automatically exposes the test database on 55432
 instead; container-to-container communication always uses the private Compose network.
 
-Seed rollback ownership, full rollback, and reapplication can be validated in a disposable
-Docker network with:
+The permanent seed rollback test script validates ownership, collision handling, checksums, and
+full rollback/reapplication:
 
 ```powershell
 .\tests\run-seed-rollback-tests.ps1
 ```
 
-To stop and remove only this testing environment:
+Containers, networks, and volumes created by this script are disposable and are cleaned up when
+the test run finishes. The separate schema test environment can be stopped with:
 
 ```powershell
 docker compose -p professional-management-db-test -f docker-compose.test.yml down
