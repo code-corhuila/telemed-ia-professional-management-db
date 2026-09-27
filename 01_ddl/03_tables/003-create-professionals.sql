@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset telemed:003-create-professionals
+--changeset telemed:003-create-professionals logicalFilePath:changes/003-create-professionals.sql
 CREATE TABLE professionals (
     id BIGSERIAL CONSTRAINT pk_professionals PRIMARY KEY,
     identity_user_id BIGINT CONSTRAINT uq_professionals_identity_user_id NOT NULL UNIQUE,

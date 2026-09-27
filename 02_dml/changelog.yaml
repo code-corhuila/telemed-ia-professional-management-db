@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - include:
+      file: 00_inserts/002-seed-specialties.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 00_inserts/004-seed-additional-specialties.sql
+      relativeToChangelogFile: true
