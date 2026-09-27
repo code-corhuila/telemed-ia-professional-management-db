@@ -2,6 +2,8 @@ databaseChangeLog:
   - include:
       file: 03_tables/001-create-specialties.sql
       relativeToChangelogFile: true
+      logicalFilePath: changes/001-create-specialties.sql
   - include:
-      file: 03_tables/003-create-professionals.sql
+      file: 03_tables/001a-create-specialty-seed-ownership.sql
       relativeToChangelogFile: true
+      logicalFilePath: changes/001a-create-specialty-seed-ownership.sql
