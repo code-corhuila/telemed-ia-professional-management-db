@@ -30,13 +30,21 @@ creates the dependent table, and `004-seed-additional-specialties.sql` completes
 with the remaining three specialties. Together they provide the seven expected specialties
 without duplicating seed data.
 
+Specialty seed changesets record ownership only for rows they actually insert. Pre-existing
+specialties skipped by `ON CONFLICT` are never claimed. Fresh databases can roll back seed-created
+rows, while legacy rows remain unowned and are preserved because historical ownership cannot be
+inferred. A complete reverse-order schema rollback eventually removes the catalog when changeset
+001 drops the `specialties` table.
+
 ## Specialty lifecycle and delete policy
 
 An administrator may create and edit specialties. An administrator may delete a specialty only when no professionals are associated with it.
 This is a hard delete, not a soft delete. If professionals reference the specialty, PostgreSQL
 rejects the deletion through the `professionals.specialty_id -> specialties.id` foreign key.
 The FK explicitly uses `ON DELETE RESTRICT`; deleting a specialty can never delete professionals
-automatically.
+automatically. The seed ownership FK uses `ON DELETE CASCADE` only to remove its metadata row when
+an unused specialty is deleted; seed rollback then has no ownership record for that row and cannot
+delete a later administrator-created specialty with the same name.
 
 This repository does not implement an API delete operation.
 
@@ -50,12 +58,20 @@ Docker Desktop is required. The test Compose file starts PostgreSQL 16 with the 
 .\tests\run-db-tests.ps1
 ```
 
-The script uses the Compose project `professional-management-db-test`, starts only its own
+This script uses the Compose project `professional-management-db-test`, starts only its own
 PostgreSQL container, runs Liquibase, and executes the SQL tests with the PostgreSQL image's
 `psql`. If local port 5432 is occupied, it automatically exposes the test database on 55432
 instead; container-to-container communication always uses the private Compose network.
 
-To stop and remove only this testing environment:
+The permanent seed rollback test script validates ownership, collision handling, checksums, and
+full rollback/reapplication:
+
+```powershell
+.\tests\run-seed-rollback-tests.ps1
+```
+
+Containers, networks, and volumes created by this script are disposable and are cleaned up when
+the test run finishes. The separate schema test environment can be stopped with:
 
 ```powershell
 docker compose -p professional-management-db-test -f docker-compose.test.yml down

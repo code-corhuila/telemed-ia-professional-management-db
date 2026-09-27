@@ -3,9 +3,6 @@ databaseChangeLog:
       file: changes/001-create-specialties.sql
       relativeToChangelogFile: true
   - include:
-      file: changes/001a-create-specialty-seed-ownership.sql
-      relativeToChangelogFile: true
-  - include:
       file: changes/002-seed-specialties.sql
       relativeToChangelogFile: true
   - include:
@@ -13,7 +10,4 @@ databaseChangeLog:
       relativeToChangelogFile: true
   - include:
       file: changes/004-seed-additional-specialties.sql
-      relativeToChangelogFile: true
-  - include:
-      file: changes/005-cascade-deleted-specialty-ownership.sql
       relativeToChangelogFile: true

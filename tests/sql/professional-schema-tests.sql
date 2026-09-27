@@ -10,6 +10,7 @@ BEGIN
     IF (SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'r'
           AND c.relname NOT IN ('specialties', 'professionals',
+                                'specialty_seed_ownership',
                                 'databasechangelog', 'databasechangeloglock')) <> 0
     THEN RAISE EXCEPTION 'Unexpected public domain tables exist'; END IF;
 
