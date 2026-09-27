@@ -21,38 +21,31 @@ not currently define professional lifecycle states, soft deletion, or normal adm
 deletion of professionals. The catalog administration scope is `specialties`.
 
 Migrations use Liquibase and are defined in
-[`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single changelog entry
-point. DDL and DML are organized under `01_ddl/` and `02_dml/`; empty DCL and TCL changelogs keep
-the family structure ready without defining unused roles, grants, or transaction operations.
-Migration SQL retains inline rollback definitions, so no separate file-based rollback scripts
-are currently needed.
+[`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
+Family changelogs organize DDL, DML, DCL, and TCL while retaining each moved migration's original
+logical file path (`changes/<migration-file>`) and `DATABASECHANGELOG` identity.
 
-The master changelog explicitly orders the migrations as `001`, `001a`, `002`, `004`, `003`,
-then `005`. The initial DDL family creates `specialties` and its seed-ownership ledger; the DML
-family inserts both specialty seed groups; the post-DML DDL changelog then creates `professionals`
-and updates the ownership foreign key. Both seed changesets need only `specialties` and the
-ownership ledger. Creating `professionals` after both seed groups ensures a reverse-order rollback
-drops the professional table before rolling back seed rows, avoiding its restrictive foreign key.
-Changeset `005` remains last so its rollback restores the original ownership FK before the earlier
-changesets are rolled back.
+The fresh-database order is `001`, `001a`, `002`, `004`, `003`, `005`. Both seed changesets need
+only `specialties` and the ownership ledger; creating `professionals` after both seed groups makes
+reverse-order rollback safe with its restrictive specialty foreign key. DCL and TCL remain empty
+scaffolding because this schema needs no roles, grants, or transaction changes.
 
-This structural PR leaves migration SQL content as found in current `develop`; it only moves the
-files into their DDL/DML families. Family changelogs assign the original Liquibase logical file
-paths (`changes/<migration-file>`), preserving each historical `author:id`, checksum, and
-`DATABASECHANGELOG.FILENAME` across the physical file move. Existing databases therefore
-recognize the historical changesets instead of attempting to reapply them.
+The initial specialty catalog remains in two seed changesets because the existing Liquibase
+history is retained without destructive changes. In a fresh database,
+`002-seed-specialties.sql` adds the first four specialties and
+`004-seed-additional-specialties.sql` adds the remaining three before
+`003-create-professionals.sql` creates the dependent table. Together the seed changesets provide
+the seven expected specialties without duplicating seed data.
 
 Seed changesets record ownership only for specialty rows they actually insert. Pre-existing
-specialties skipped by `ON CONFLICT` are not claimed and are preserved by seed rollback. The
-ownership foreign key cascades only when an unused specialty is deleted; the professional foreign
-key remains restrictive. On legacy databases, ownership cannot be inferred for already-applied
-seed rows, so the new ledger is intentionally not backfilled. Rolling back those legacy seed
-changesets removes their Liquibase history but preserves the unowned rows; only a complete rollback
-that drops `specialties` removes that legacy data.
+specialties skipped by `ON CONFLICT` are never claimed. Fresh databases can roll back seed-created
+rows, while legacy rows remain unowned and are preserved because historical ownership cannot be
+inferred. Legacy seed rollback removes Liquibase history but preserves unowned rows; a complete
+rollback drops the catalog when changeset 001 removes `specialties`.
 
-The domain PostgreSQL deployment configuration is [`deploy/compose.yml`](deploy/compose.yml).
-Copy `.env.example` to `.env` and set the database name, user, password, and optional port before
-starting it. `.env` is ignored by Git.
+The deployment configuration is [`deploy/compose.yml`](deploy/compose.yml). Copy `.env.example`
+to `.env` and set the database name, user, password, and optional port before starting; `.env` is
+ignored by Git.
 
 ## Specialty lifecycle and delete policy
 
@@ -68,25 +61,22 @@ This repository does not implement an API delete operation.
 
 ## Running schema tests
 
-Docker Desktop is required. The test Compose file starts PostgreSQL 16 with a generated,
-disposable password. Liquibase and `psql` run in containers, so they do not need to be installed
-locally. The runner generates a disposable password and supplies `TEST_DB_USER` and
-`TEST_DB_PASSWORD` to Compose. PostgreSQL receives `POSTGRES_PASSWORD`, Liquibase receives its
-credentials through its environment, and the runner passes `PGPASSWORD` directly to the `psql`
-client invocation. The test database is not published on a host port.
+Docker Desktop is required. Liquibase and `psql` run in containers. Each run uses a unique Compose
+project and generated disposable credentials; the runner passes `PGPASSWORD` only to `psql` and
+does not publish a host port.
 
 ```powershell
 .\tests\run-db-tests.ps1
 ```
 
-The script accepts `-ComposeCommand` or `COMPOSE_CMD`, uses a unique Compose project and generated
-disposable credentials for each run, and executes the complete lifecycle: fresh update, schema
-assertions, no-op second update, full rollback, empty-schema/changelog verification, reapplication,
-and final schema assertions. The runner restores prior `TEST_DB_PASSWORD`/`TEST_DB_USER` values and
-cleans up its containers, network, and volume in a `finally` block.
+The script accepts `-ComposeCommand` or `COMPOSE_CMD` and performs a fresh update, schema
+assertions, no-op second update, full rollback and empty-state checks, then reapplication and
+final schema assertions. It restores prior `TEST_DB_PASSWORD`/`TEST_DB_USER` values and cleans up
+its containers, network, and volume in a `finally` block.
 
 The permanent seed rollback tests validate ownership collisions, legacy Liquibase checksums,
 staged and full rollback, and reapplication:
+
 ```powershell
 .\tests\run-seed-rollback-tests.ps1
 ```
