@@ -61,18 +61,40 @@ This repository does not implement an API delete operation.
 
 ## Running schema tests
 
-Docker Desktop is required. Liquibase and `psql` run in containers. Each run uses a unique Compose
-project and generated disposable credentials; the runner passes `PGPASSWORD` only to `psql` and
-does not publish a host port.
+Docker Desktop is required. Liquibase and `psql` run inside PostgreSQL/Liquibase containers, so
+they do not need to be installed locally. Each execution creates a unique Compose project and a
+fresh database with a generated disposable password. The runner prints the project name when it
+starts. It applies the Liquibase changelog, checks a second update is a no-op, performs a complete
+rollback, verifies the database state, and reapplies the changesets with schema assertions.
+The runner explicitly selects every Liquibase action. PostgreSQL and Liquibase receive the
+generated password through environment variables, and test `psql` connects over TCP.
 
 ```powershell
 .\tests\run-db-tests.ps1
 ```
 
-The script accepts `-ComposeCommand` or `COMPOSE_CMD` and performs a fresh update, schema
-assertions, no-op second update, full rollback and empty-state checks, then reapplication and
-final schema assertions. It restores prior `TEST_DB_PASSWORD`/`TEST_DB_USER` values and cleans up
-its containers, network, and volume in a `finally` block.
+The runner removes only the containers, network, and volume belonging to its generated project
+in a `finally` block, including when a test fails. It restores the previous
+`TEST_DB_PASSWORD` environment value. The test project does not publish a host port or reuse
+resources from another run.
+
+If the runner is interrupted with Ctrl+C, PowerShell's `finally` block is not reliably invoked
+while the main thread is blocked inside a synchronous `docker` call. The runner also registers a
+`Console.CancelKeyPress` handler as a best-effort safety net: it runs `docker compose down
+--volumes --remove-orphans` for the same generated project and restores `TEST_DB_PASSWORD`. This
+handler does not interrupt a `docker` command that is already running; PowerShell dispatches
+Ctrl+C once control returns to the engine, typically after the in-progress `docker` call finishes
+or is itself stopped, and the handler's cleanup runs at that point. It does not take control of
+the interrupt or force the process to exit; it only runs this cleanup and then lets the host's
+normal Ctrl+C behavior continue afterward. This is not an absolute guarantee: a forced kill (Task
+Manager, `taskkill /F`, closing the terminal, or a second interrupt before cleanup finishes)
+bypasses all user-mode handlers and can still leave the project's containers, network, or volume
+behind. If that happens, use the project name the runner printed at startup to remove it
+manually:
+
+```powershell
+docker compose -p <printed-project-name> -f docker-compose.test.yml down --volumes --remove-orphans
+```
 
 The permanent seed rollback tests validate ownership collisions, legacy Liquibase checksums,
 staged and full rollback, and reapplication:
@@ -81,7 +103,32 @@ staged and full rollback, and reapplication:
 .\tests\run-seed-rollback-tests.ps1
 ```
 
+The automated runner cleans up its generated project when it exits. If a separate environment
+was started manually with the `professional-management-db-test` project name, stop that named
+environment with:
+
+```powershell
+docker compose -p professional-management-db-test -f docker-compose.test.yml down
+```
+
+## Manual debugging
+
+While the automated test is running, use the generated project name printed by the runner to
+inspect that run's database. The runner cleans it up when it exits. To keep a separate database
+available for manual inspection, use the `professional-db-debug` project below. Run the commands
+in order, exit the interactive `psql` session with `\q`, then run the cleanup commands.
+
 The Compose file and script do not reference production or monolith databases.
+
+```powershell
+$debugProject = "professional-db-debug-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+$env:TEST_DB_PASSWORD = [Guid]::NewGuid().ToString('N')
+docker compose -p $debugProject -f docker-compose.test.yml up -d postgres
+docker compose -p $debugProject -f docker-compose.test.yml run --rm liquibase update
+docker compose -p $debugProject -f docker-compose.test.yml exec -T -e "PGPASSWORD=$env:TEST_DB_PASSWORD" postgres psql -U test_user -d professional_management_test
+docker compose -p $debugProject -f docker-compose.test.yml down --volumes --remove-orphans
+Remove-Item Env:\TEST_DB_PASSWORD
+```
 
 ## Branching
 
