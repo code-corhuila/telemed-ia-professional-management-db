@@ -20,7 +20,11 @@ services:
         condition: service_healthy
     working_dir: /workspace
     volumes:
-      - .:/workspace:ro
+      - ./changelog:/workspace/changelog:ro
+      - ./01_ddl:/workspace/01_ddl:ro
+      - ./02_dml:/workspace/02_dml:ro
+      - ./03_dcl:/workspace/03_dcl:ro
+      - ./04_tcl:/workspace/04_tcl:ro
     environment:
       LIQUIBASE_COMMAND_URL: jdbc:postgresql://postgres:5432/professional_management_test
       LIQUIBASE_COMMAND_USERNAME: ${TEST_DB_USER:?TEST_DB_USER must be set}
