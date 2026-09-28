@@ -1,15 +1,15 @@
 databaseChangeLog:
-  # Phase 1: pre-DML DDL - tables/objects the seed data below depends on.
+  # Phase 1: the initial DDL changelog (01_ddl/changelog.yaml) creates the tables/objects needed by seed data.
   - include:
       file: ../01_ddl/changelog.yaml
       relativeToChangelogFile: true
-  # Phase 2: DML - seed data inserted before the post-DML DDL phase.
+  # Phase 2: 02_dml/changelog.yaml runs after the initial DDL phase and inserts seed data.
   - include:
       file: ../02_dml/changelog.yaml
       relativeToChangelogFile: true
-  # Phase 3: post-DML DDL/constraints - the 01_ddl family also has changesets that
-  # must run after Phase 2 (see 01_ddl/changelog-post-dml.yaml), so 01_ddl is not a
-  # single contiguous block in this execution order.
+  # Phase 3: 01_ddl/changelog-post-dml.yaml contains historical DDL changesets intentionally run after DML.
+  # This split is intentional: not all contents of the 01_ddl family run before 02_dml.
+  # This master changelog explicitly defines the sequence through its include order.
   - include:
       file: ../01_ddl/changelog-post-dml.yaml
       relativeToChangelogFile: true
