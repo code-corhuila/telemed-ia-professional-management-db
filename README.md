@@ -67,6 +67,24 @@ in a `finally` block, including when a test fails. It restores the previous
 `TEST_DB_PASSWORD` environment value. The test project does not publish a host port or reuse
 resources from another run.
 
+If the runner is interrupted with Ctrl+C, PowerShell's `finally` block is not reliably invoked
+while the main thread is blocked inside a synchronous `docker` call. The runner also registers a
+`Console.CancelKeyPress` handler as a best-effort safety net: it runs `docker compose down
+--volumes --remove-orphans` for the same generated project and restores `TEST_DB_PASSWORD`. This
+handler does not interrupt a `docker` command that is already running; PowerShell dispatches
+Ctrl+C once control returns to the engine, typically after the in-progress `docker` call finishes
+or is itself stopped, and the handler's cleanup runs at that point. It does not take control of
+the interrupt or force the process to exit; it only runs this cleanup and then lets the host's
+normal Ctrl+C behavior continue afterward. This is not an absolute guarantee: a forced kill (Task
+Manager, `taskkill /F`, closing the terminal, or a second interrupt before cleanup finishes)
+bypasses all user-mode handlers and can still leave the project's containers, network, or volume
+behind. If that happens, use the project name the runner printed at startup to remove it
+manually:
+
+```powershell
+docker compose -p <printed-project-name> -f docker-compose.test.yml down --volumes --remove-orphans
+```
+
 The permanent seed rollback test script validates ownership, collision handling, checksums, and
 full rollback/reapplication:
 
