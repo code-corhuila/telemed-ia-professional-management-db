@@ -22,8 +22,14 @@ deletion of professionals. The catalog administration scope is `specialties`.
 
 Migrations use Liquibase and are defined in
 [`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
-Family changelogs organize DDL, DML, DCL, and TCL while retaining each moved migration's original
-logical file path (`changes/<migration-file>`) and `DATABASECHANGELOG` identity.
+Family changelogs organize DDL, DML, DCL, and TCL. The master changelog explicitly orders the
+initial DDL phase, DML phase, and post-DML DDL phase; the `01_ddl` family is intentionally split
+around DML, so its files do not all run before `02_dml`.
+
+`logicalFilePath` is used only for historical changesets moved during the repository reorganization,
+to preserve their historical Liquibase identity in `DATABASECHANGELOG`. New changesets must use
+their normal current file paths and must not copy `logicalFilePath` just because a historical
+changeset has it.
 
 The fresh-database order is `001`, `001a`, `002`, `004`, `003`, `005`. Both seed changesets need
 only `specialties` and the ownership ledger; creating `professionals` after both seed groups makes
