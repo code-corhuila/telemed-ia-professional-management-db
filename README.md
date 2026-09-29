@@ -22,19 +22,23 @@ deletion of professionals. The catalog administration scope is `specialties`.
 
 Migrations use Liquibase and are defined in
 [`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
-Family changelogs organize DDL, DML, DCL, and TCL. The master changelog explicitly orders the
-initial DDL phase, DML phase, and post-DML DDL phase; the `01_ddl` family is intentionally split
-around DML, so its files do not all run before `02_dml`.
+The four migration families are `01_ddl`, `02_dml`, `03_dcl`, and `04_tcl`. The `01_ddl` family
+intentionally has two changelog fragments: `01_ddl/changelog.yaml` and
+`01_ddl/changelog-post-dml.yaml`. The root changelog coordinates the DDL phases around `02_dml` to
+preserve the historical execution and rollback order: `001` → `001a` → `002` → `004` → `003` →
+`005`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
 
-`logicalFilePath` is used only for historical changesets moved during the repository reorganization,
-to preserve their historical Liquibase identity in `DATABASECHANGELOG`. New changesets must use
-their normal current file paths and must not copy `logicalFilePath` just because a historical
-changeset has it.
+Use `logicalFilePath` only for historical changesets whose physical SQL path changed during
+repository reorganization. Its value must preserve the exact historical logical path used by
+Liquibase, and existing values must not be changed. New changesets should normally use their current
+physical path; do not copy `logicalFilePath` as a template. Use a different logical path only for an
+explicit, documented compatibility reason.
 
-The fresh-database order is `001`, `001a`, `002`, `004`, `003`, `005`. Both seed changesets need
-only `specialties` and the ownership ledger; creating `professionals` after both seed groups makes
-reverse-order rollback safe with its restrictive specialty foreign key. DCL and TCL remain empty
-scaffolding because this schema needs no roles, grants, or transaction changes.
+Both seed changesets need only `specialties` and the ownership ledger; creating `professionals`
+after both seed groups makes reverse-order rollback safe with its restrictive specialty foreign key.
+`03_dcl` is reserved for database access-control changes such as roles, grants, and privileges.
+`04_tcl` is reserved for transaction-control changes when required. Both families are currently
+empty because the Professional Management database does not require these changes.
 
 The initial specialty catalog remains in two seed changesets because the existing Liquibase
 history is retained without destructive changes. In a fresh database,
