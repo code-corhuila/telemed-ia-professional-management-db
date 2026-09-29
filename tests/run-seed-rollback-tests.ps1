@@ -196,9 +196,9 @@ try {
 
     $adminDelete = $databases[6]; NewDb $adminDelete; L $adminDelete @('update-count', '--count', '6')
     $backfillSpecialtyId = Scalar $adminDelete "SELECT id FROM specialties WHERE name='Medicina General'"
-    P $adminDelete "INSERT INTO professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000099,'TEST-MIGRATION-BACKFILL-006',$backfillSpecialtyId,0)"
+    P $adminDelete "INSERT INTO professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000099,'TEST-MIGRATION-TRANSITION-006',$backfillSpecialtyId,0)"
     L $adminDelete @('update'); Schema $adminDelete
-    A $adminDelete "EXISTS (SELECT 1 FROM professionals WHERE license_number='TEST-MIGRATION-BACKFILL-006' AND professional_type='GENERAL_PRACTITIONER' AND status='ACTIVE')" 'Migration 006 did not initialize existing professional values.'
+    A $adminDelete "EXISTS (SELECT 1 FROM professionals WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE')" 'Migration 006 must preserve unknown professional_type and default status to ACTIVE.'
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='c')=1" 'Ownership FK must cascade only its metadata row.'
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_professionals_specialty' AND confdeltype='r')=1" 'Professional FK must remain restrictive.'
     $ownedId = Scalar $adminDelete "SELECT id FROM specialties WHERE name=$neurology"

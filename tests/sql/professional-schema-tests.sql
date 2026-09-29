@@ -40,14 +40,19 @@ BEGIN
     IF (SELECT COUNT(*) FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'professionals'
           AND column_name = 'professional_type' AND data_type = 'character varying'
-          AND character_maximum_length = 30 AND is_nullable = 'NO') <> 1
-    THEN RAISE EXCEPTION 'Expected professionals.professional_type VARCHAR(30) NOT NULL'; END IF;
+          AND character_maximum_length = 30 AND is_nullable = 'YES') <> 1
+    THEN RAISE EXCEPTION 'Expected nullable professionals.professional_type VARCHAR(30)'; END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'professionals'
           AND column_name = 'status' AND data_type = 'character varying'
           AND character_maximum_length = 20 AND is_nullable = 'NO') <> 1
     THEN RAISE EXCEPTION 'Expected professionals.status VARCHAR(20) NOT NULL'; END IF;
+
+    IF (SELECT column_default FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'professionals'
+          AND column_name = 'status') <> '''ACTIVE''::character varying'
+    THEN RAISE EXCEPTION 'Expected professionals.status DEFAULT ACTIVE'; END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'professionals'
@@ -94,6 +99,14 @@ BEGIN
     VALUES (900000001, 'TEST-SAFE-DELETE-001', protected_specialty_id, 0,
             'GENERAL_PRACTITIONER', 'ACTIVE');
 
+    INSERT INTO professionals
+        (identity_user_id, license_number, specialty_id, years_experience)
+    VALUES (900000002, 'TEST-API-INSERT-001', protected_specialty_id, 0);
+    IF NOT EXISTS (SELECT 1 FROM professionals
+                   WHERE license_number = 'TEST-API-INSERT-001'
+                     AND professional_type IS NULL AND status = 'ACTIVE')
+    THEN RAISE EXCEPTION 'API-compatible insert must default status and retain null professional_type'; END IF;
+
     UPDATE professionals
     SET professional_type = 'SPECIALIST', status = 'INACTIVE'
     WHERE license_number = 'TEST-SAFE-DELETE-001';
@@ -101,6 +114,11 @@ BEGIN
                    WHERE license_number = 'TEST-SAFE-DELETE-001'
                      AND professional_type = 'SPECIALIST' AND status = 'INACTIVE')
     THEN RAISE EXCEPTION 'Expected the allowed professional_type and status values'; END IF;
+
+    UPDATE professionals SET professional_type = 'GENERAL_PRACTITIONER'
+    WHERE license_number = 'TEST-SAFE-DELETE-001';
+    UPDATE professionals SET status = 'ACTIVE'
+    WHERE license_number = 'TEST-SAFE-DELETE-001';
 
     BEGIN
         UPDATE professionals SET professional_type = 'INVALID'
@@ -127,6 +145,7 @@ BEGIN
     THEN RAISE EXCEPTION 'Professional must remain after rejected delete'; END IF;
 
     DELETE FROM professionals WHERE license_number = 'TEST-SAFE-DELETE-001';
+    DELETE FROM professionals WHERE license_number = 'TEST-API-INSERT-001';
     DELETE FROM specialties WHERE id = protected_specialty_id;
 END;
 $$;
