@@ -7,3 +7,6 @@ databaseChangeLog:
       file: 04_constraints/005-cascade-deleted-specialty-ownership.sql
       relativeToChangelogFile: true
       logicalFilePath: changes/005-cascade-deleted-specialty-ownership.sql
+  - include:
+      file: 04_alter/006-add-professional-type-and-status.sql
+      relativeToChangelogFile: true
