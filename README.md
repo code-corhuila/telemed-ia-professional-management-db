@@ -16,9 +16,10 @@ and `professionals` tables;
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
 
-An existing `professionals` row represents an active professional. This bounded context does
-not currently define professional lifecycle states, soft deletion, or normal administrator
-deletion of professionals. The catalog administration scope is `specialties`.
+An existing `professionals` row represents an active professional. The `status` field records
+whether a professional is `ACTIVE` or `INACTIVE`; this bounded context does not currently define
+soft deletion or normal administrator deletion of professionals. The catalog administration
+scope is `specialties`.
 
 Migrations use Liquibase and are defined in
 [`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
@@ -26,7 +27,7 @@ The four migration families are `01_ddl`, `02_dml`, `03_dcl`, and `04_tcl`. The 
 intentionally has two changelog fragments: `01_ddl/changelog.yaml` and
 `01_ddl/changelog-post-dml.yaml`. The root changelog coordinates the DDL phases around `02_dml` to
 preserve the historical execution and rollback order: `001` → `001a` → `002` → `004` → `003` →
-`005`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
+`005` → `006`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
 
 Use `logicalFilePath` only for historical changesets whose physical SQL path changed during
 repository reorganization. Its value must preserve the exact historical logical path used by
@@ -36,6 +37,9 @@ explicit, documented compatibility reason.
 
 Both seed changesets need only `specialties` and the ownership ledger; creating `professionals`
 after both seed groups makes reverse-order rollback safe with its restrictive specialty foreign key.
+Migration `006` adds `professional_type` (`GENERAL_PRACTITIONER` or `SPECIALIST`) and `status`
+(`ACTIVE` or `INACTIVE`) to `professionals`, initializing existing rows to
+`GENERAL_PRACTITIONER` and `ACTIVE`.
 `03_dcl` is reserved for database access-control changes such as roles, grants, and privileges.
 `04_tcl` is reserved for transaction-control changes when required. Both families are currently
 empty because the Professional Management database does not require these changes.
