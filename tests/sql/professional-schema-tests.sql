@@ -39,8 +39,30 @@ BEGIN
 
     IF (SELECT COUNT(*) FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'professionals'
-          AND column_name IN ('status', 'active', 'is_active', 'deleted_at')) <> 0
+          AND column_name = 'professional_type' AND data_type = 'character varying'
+          AND character_maximum_length = 30 AND is_nullable = 'NO') <> 1
+    THEN RAISE EXCEPTION 'Expected professionals.professional_type VARCHAR(30) NOT NULL'; END IF;
+
+    IF (SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'professionals'
+          AND column_name = 'status' AND data_type = 'character varying'
+          AND character_maximum_length = 20 AND is_nullable = 'NO') <> 1
+    THEN RAISE EXCEPTION 'Expected professionals.status VARCHAR(20) NOT NULL'; END IF;
+
+    IF (SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'professionals'
+          AND column_name IN ('active', 'is_active', 'deleted_at')) <> 0
     THEN RAISE EXCEPTION 'Unexpected professional lifecycle columns exist'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'public.professionals'::regclass
+          AND conname = 'ck_professionals_professional_type' AND contype = 'c' AND convalidated) <> 1
+    THEN RAISE EXCEPTION 'Expected validated professional_type CHECK constraint'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'public.professionals'::regclass
+          AND conname = 'ck_professionals_status' AND contype = 'c' AND convalidated) <> 1
+    THEN RAISE EXCEPTION 'Expected validated status CHECK constraint'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
         WHERE conrelid = 'public.professionals'::regclass AND contype = 'f'
@@ -67,8 +89,32 @@ BEGIN
     INSERT INTO specialties (name, description)
     VALUES ('Prueba eliminación protegida', 'Delete protection test')
     RETURNING id INTO protected_specialty_id;
-    INSERT INTO professionals (identity_user_id, license_number, specialty_id, years_experience)
-    VALUES (900000001, 'TEST-SAFE-DELETE-001', protected_specialty_id, 0);
+    INSERT INTO professionals
+        (identity_user_id, license_number, specialty_id, years_experience, professional_type, status)
+    VALUES (900000001, 'TEST-SAFE-DELETE-001', protected_specialty_id, 0,
+            'GENERAL_PRACTITIONER', 'ACTIVE');
+
+    UPDATE professionals
+    SET professional_type = 'SPECIALIST', status = 'INACTIVE'
+    WHERE license_number = 'TEST-SAFE-DELETE-001';
+    IF NOT EXISTS (SELECT 1 FROM professionals
+                   WHERE license_number = 'TEST-SAFE-DELETE-001'
+                     AND professional_type = 'SPECIALIST' AND status = 'INACTIVE')
+    THEN RAISE EXCEPTION 'Expected the allowed professional_type and status values'; END IF;
+
+    BEGIN
+        UPDATE professionals SET professional_type = 'INVALID'
+        WHERE license_number = 'TEST-SAFE-DELETE-001';
+        RAISE EXCEPTION 'Invalid professional_type should be rejected';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+
+    BEGIN
+        UPDATE professionals SET status = 'PENDING'
+        WHERE license_number = 'TEST-SAFE-DELETE-001';
+        RAISE EXCEPTION 'Invalid status should be rejected';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
 
     BEGIN
         DELETE FROM specialties WHERE id = protected_specialty_id;
