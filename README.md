@@ -38,8 +38,11 @@ explicit, documented compatibility reason.
 Both seed changesets need only `specialties` and the ownership ledger; creating `professionals`
 after both seed groups makes reverse-order rollback safe with its restrictive specialty foreign key.
 Migration `006` adds `professional_type` (`GENERAL_PRACTITIONER` or `SPECIALIST`) and `status`
-(`ACTIVE` or `INACTIVE`) to `professionals`, initializing existing rows to
-`GENERAL_PRACTITIONER` and `ACTIVE`.
+(`ACTIVE` or `INACTIVE`) to `professionals`. During this transition, `professional_type` is nullable
+because historical data does not establish each existing professional's type; the migration does
+not backfill or default it. `status` defaults to `ACTIVE` so inserts using the current Professional
+API contract, which omits both new fields, remain compatible. Rolling back changeset 006 drops both
+columns and removes any values written to them after deployment.
 `03_dcl` is reserved for database access-control changes such as roles, grants, and privileges.
 `04_tcl` is reserved for transaction-control changes when required. Both families are currently
 empty because the Professional Management database does not require these changes.
