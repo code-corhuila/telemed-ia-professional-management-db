@@ -21,20 +21,41 @@ not currently define professional lifecycle states, soft deletion, or normal adm
 deletion of professionals. The catalog administration scope is `specialties`.
 
 Migrations use Liquibase and are defined in
-[`db/changelog/db.changelog-master.yaml`](db/changelog/db.changelog-master.yaml).
+[`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
+The four migration families are `01_ddl`, `02_dml`, `03_dcl`, and `04_tcl`. The `01_ddl` family
+intentionally has two changelog fragments: `01_ddl/changelog.yaml` and
+`01_ddl/changelog-post-dml.yaml`. The root changelog coordinates the DDL phases around `02_dml` to
+preserve the historical execution and rollback order: `001` → `001a` → `002` → `004` → `003` →
+`005`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
+
+Use `logicalFilePath` only for historical changesets whose physical SQL path changed during
+repository reorganization. Its value must preserve the exact historical logical path used by
+Liquibase, and existing values must not be changed. New changesets should normally use their current
+physical path; do not copy `logicalFilePath` as a template. Use a different logical path only for an
+explicit, documented compatibility reason.
+
+Both seed changesets need only `specialties` and the ownership ledger; creating `professionals`
+after both seed groups makes reverse-order rollback safe with its restrictive specialty foreign key.
+`03_dcl` is reserved for database access-control changes such as roles, grants, and privileges.
+`04_tcl` is reserved for transaction-control changes when required. Both families are currently
+empty because the Professional Management database does not require these changes.
 
 The initial specialty catalog remains in two seed changesets because the existing Liquibase
-history is retained without destructive changes. The execution order is intentional:
-`002-seed-specialties.sql` adds the first four specialties, `003-create-professionals.sql`
-creates the dependent table, and `004-seed-additional-specialties.sql` completes the catalog
-with the remaining three specialties. Together they provide the seven expected specialties
-without duplicating seed data.
+history is retained without destructive changes. In a fresh database,
+`002-seed-specialties.sql` adds the first four specialties and
+`004-seed-additional-specialties.sql` adds the remaining three before
+`003-create-professionals.sql` creates the dependent table. Together the seed changesets provide
+the seven expected specialties without duplicating seed data.
 
-Specialty seed changesets record ownership only for rows they actually insert. Pre-existing
+Seed changesets record ownership only for specialty rows they actually insert. Pre-existing
 specialties skipped by `ON CONFLICT` are never claimed. Fresh databases can roll back seed-created
 rows, while legacy rows remain unowned and are preserved because historical ownership cannot be
-inferred. A complete reverse-order schema rollback eventually removes the catalog when changeset
-001 drops the `specialties` table.
+inferred. Legacy seed rollback removes Liquibase history but preserves unowned rows; a complete
+rollback drops the catalog when changeset 001 removes `specialties`.
+
+The deployment configuration is [`deploy/compose.yml`](deploy/compose.yml). Copy `.env.example`
+to `.env` and set the database name, user, password, and optional port before starting; `.env` is
+ignored by Git.
 
 ## Specialty lifecycle and delete policy
 
@@ -85,8 +106,8 @@ manually:
 docker compose -p <printed-project-name> -f docker-compose.test.yml down --volumes --remove-orphans
 ```
 
-The permanent seed rollback test script validates ownership, collision handling, checksums, and
-full rollback/reapplication:
+The permanent seed rollback tests validate ownership collisions, legacy Liquibase checksums,
+staged and full rollback, and reapplication:
 
 ```powershell
 .\tests\run-seed-rollback-tests.ps1
@@ -106,6 +127,8 @@ While the automated test is running, use the generated project name printed by t
 inspect that run's database. The runner cleans it up when it exits. To keep a separate database
 available for manual inspection, use the `professional-db-debug` project below. Run the commands
 in order, exit the interactive `psql` session with `\q`, then run the cleanup commands.
+
+The Compose file and script do not reference production or monolith databases.
 
 ```powershell
 $debugProject = "professional-db-debug-$([guid]::NewGuid().ToString('N').Substring(0, 8))"

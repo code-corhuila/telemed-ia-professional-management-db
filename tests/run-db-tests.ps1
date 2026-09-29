@@ -22,6 +22,7 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repositoryRoot 'docker-compose.test.yml'
 $projectName = "professional-db-test-$PID-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
 $composeArgs = @('-p', $projectName, '-f', $composeFile)
+$previousUser = $env:TEST_DB_USER
 $previousPassword = $env:TEST_DB_PASSWORD
 $passwordBytes = New-Object byte[] 32
 $random = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -30,6 +31,7 @@ try {
 } finally {
     $random.Dispose()
 }
+$env:TEST_DB_USER = 'test_user'
 $env:TEST_DB_PASSWORD = [BitConverter]::ToString($passwordBytes).Replace('-', '')
 $testPassword = $env:TEST_DB_PASSWORD
 
@@ -93,6 +95,7 @@ try {
     $interruptSubscription = Register-ObjectEvent -InputObject ([Console]) -EventName 'CancelKeyPress' -MessageData @{
         ComposeCommand   = $ComposeCommand
         ComposeArgs      = $composeArgs
+        PreviousUser     = $previousUser
         PreviousPassword = $previousPassword
         TestPassword     = $testPassword
     } -Action {
@@ -102,6 +105,11 @@ try {
             Invoke-IsolatedComposeDown -ComposeCommand $data.ComposeCommand -ComposeArgs $data.ComposeArgs -Password $data.TestPassword
         } catch {
             Write-Warning "Interrupt cleanup failed to run Docker Compose: $_"
+        }
+        if ($null -eq $data.PreviousUser) {
+            Remove-Item Env:\TEST_DB_USER -ErrorAction SilentlyContinue
+        } else {
+            $env:TEST_DB_USER = $data.PreviousUser
         }
         if ($null -eq $data.PreviousPassword) {
             Remove-Item Env:\TEST_DB_PASSWORD -ErrorAction SilentlyContinue
@@ -227,6 +235,11 @@ try {
         } else {
             Write-Warning "Docker cleanup also failed: $_"
         }
+    }
+    if ($null -eq $previousUser) {
+        Remove-Item Env:\TEST_DB_USER -ErrorAction SilentlyContinue
+    } else {
+        $env:TEST_DB_USER = $previousUser
     }
     if ($null -eq $previousPassword) {
         Remove-Item Env:\TEST_DB_PASSWORD -ErrorAction SilentlyContinue
