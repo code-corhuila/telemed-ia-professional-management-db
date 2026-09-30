@@ -86,19 +86,29 @@ BEGIN
 
     IF (SELECT COUNT(*) FROM information_schema.columns
         WHERE table_schema = 'professional_management' AND table_name = 'professionals'
-          AND column_name = 'professional_type' AND data_type = 'character varying'
-          AND character_maximum_length = 30 AND is_nullable = 'YES') <> 1
-    THEN RAISE EXCEPTION 'Expected nullable professionals.professional_type VARCHAR(30)'; END IF;
+          AND column_name = 'professional_type' AND data_type = 'text'
+          AND is_nullable = 'YES') <> 1
+    THEN RAISE EXCEPTION 'Expected nullable professionals.professional_type text'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.professionals'::regclass
+          AND conname = 'chk_professionals_professional_type_length' AND contype = 'c' AND convalidated) <> 1
+    THEN RAISE EXCEPTION 'Expected chk_professionals_professional_type_length CHECK'; END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
         WHERE table_schema = 'professional_management' AND table_name = 'professionals'
-          AND column_name = 'status' AND data_type = 'character varying'
-          AND character_maximum_length = 20 AND is_nullable = 'NO') <> 1
-    THEN RAISE EXCEPTION 'Expected professionals.status VARCHAR(20) NOT NULL'; END IF;
+          AND column_name = 'status' AND data_type = 'text'
+          AND is_nullable = 'NO') <> 1
+    THEN RAISE EXCEPTION 'Expected professionals.status text NOT NULL'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.professionals'::regclass
+          AND conname = 'chk_professionals_status_length' AND contype = 'c' AND convalidated) <> 1
+    THEN RAISE EXCEPTION 'Expected chk_professionals_status_length CHECK'; END IF;
 
     IF (SELECT column_default FROM information_schema.columns
         WHERE table_schema = 'professional_management' AND table_name = 'professionals'
-          AND column_name = 'status') <> '''ACTIVE''::character varying'
+          AND column_name = 'status') <> '''ACTIVE''::text'
     THEN RAISE EXCEPTION 'Expected professionals.status DEFAULT ACTIVE'; END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
@@ -120,6 +130,18 @@ BEGIN
         WHERE conrelid = 'professional_management.professionals'::regclass
           AND conname = 'chk_professionals_status' AND contype = 'c' AND convalidated) <> 1
     THEN RAISE EXCEPTION 'Expected validated status CHECK constraint'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conname = 'uq_specialties_name' AND contype = 'u') <> 1
+    THEN RAISE EXCEPTION 'Expected uq_specialties_name'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conname = 'uq_professionals_identity_user_id' AND contype = 'u') <> 1
+    THEN RAISE EXCEPTION 'Expected uq_professionals_identity_user_id'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conname = 'uq_professionals_license_number' AND contype = 'u') <> 1
+    THEN RAISE EXCEPTION 'Expected uq_professionals_license_number'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
         WHERE conrelid = 'professional_management.professionals'::regclass AND contype = 'f'
@@ -153,6 +175,47 @@ BEGIN
           AND indexname = 'idx_specialty_seed_ownership_specialty_id'
           AND indexdef ILIKE '%(specialty_id)%') <> 1
     THEN RAISE EXCEPTION 'Expected specialty_seed_ownership specialty_id index'; END IF;
+
+    -- The UNIQUE constraints renamed by ddl-alter-010 must still reject
+    -- duplicates. Each block raises a plain exception when the insert is
+    -- wrongly accepted; only unique_violation is swallowed, so an accepted
+    -- duplicate fails the run instead of passing silently.
+    BEGIN
+        INSERT INTO professional_management.specialties (name, description)
+        VALUES ('Medicina General', 'dup');
+        RAISE EXCEPTION 'Duplicate specialty name should be rejected';
+    EXCEPTION WHEN unique_violation THEN NULL;
+    END;
+
+    -- The two professional duplicates need a stored row to collide with, so
+    -- the baseline professional is created outside the assertion block.
+    INSERT INTO professional_management.professionals
+        (identity_user_id, license_number, specialty_id, years_experience)
+    SELECT 999999991, 'DUP-LICENSE', id, 0
+    FROM professional_management.specialties WHERE name = 'Pediatría';
+
+    BEGIN
+        INSERT INTO professional_management.professionals
+            (identity_user_id, license_number, specialty_id, years_experience)
+        SELECT 999999992, 'DUP-LICENSE', id, 0
+        FROM professional_management.specialties WHERE name = 'Pediatría';
+        RAISE EXCEPTION 'Duplicate license_number should be rejected';
+    EXCEPTION WHEN unique_violation THEN NULL;
+    END;
+
+    BEGIN
+        INSERT INTO professional_management.professionals
+            (identity_user_id, license_number, specialty_id, years_experience)
+        SELECT 999999991, 'DUP-IDENTITY', id, 0
+        FROM professional_management.specialties WHERE name = 'Pediatría';
+        RAISE EXCEPTION 'Duplicate identity_user_id should be rejected';
+    EXCEPTION WHEN unique_violation THEN NULL;
+    END;
+
+    DELETE FROM professional_management.professionals WHERE license_number = 'DUP-LICENSE';
+    IF EXISTS (SELECT 1 FROM professional_management.professionals
+               WHERE license_number = 'DUP-LICENSE' OR identity_user_id = 999999991)
+    THEN RAISE EXCEPTION 'Rejected duplicates must not create a professional'; END IF;
 
     INSERT INTO professional_management.specialties (name, description)
     VALUES ('Prueba eliminación libre', 'Delete test');
