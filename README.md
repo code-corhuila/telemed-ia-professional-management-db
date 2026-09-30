@@ -158,6 +158,10 @@ idempotency key in the same transaction. If the same key is received again,
 the service reverts and returns the originally created professional. The `key`
 column is constrained to 8-128 characters, matching the database standard.
 
+### Request fingerprint
+
+`idempotency_key.request_hash` stores the hash of the request body. When a retry arrives with an existing key, the API compares the incoming request's hash with the stored one. If they differ, the API rejects the retry with `422 BUSINESS_RULE_VIOLATION` instead of silently returning the original resource. The hash algorithm and encoding are chosen by the API implementation and must be consistent across retries.
+
 ## Schema qualification
 
 Domain tables live in `professional_management`, not in `public`. Consumers
