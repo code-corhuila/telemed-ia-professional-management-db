@@ -1,1 +1,13 @@
-databaseChangeLog: []
+databaseChangeLog:
+  - changeSet:
+      id: 001-grants
+      author: telemed
+      comment: "Grant application roles access to Professional Management schema objects."
+      changes:
+        - sqlFile:
+            path: 001_grants.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/03_dcl/01_grants/001_grants.rollback.sql
+            relativeToChangelogFile: true

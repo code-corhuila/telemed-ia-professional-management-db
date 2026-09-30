@@ -1,0 +1,4 @@
+CREATE ROLE professional_management_reader NOLOGIN;
+CREATE ROLE professional_management_writer NOLOGIN;
+
+GRANT professional_management_reader TO professional_management_writer;
