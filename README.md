@@ -16,9 +16,14 @@ and `professionals` tables;
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
 
-An existing `professionals` row represents an active professional. This bounded context does
-not currently define professional lifecycle states, soft deletion, or normal administrator
-deletion of professionals. The catalog administration scope is `specialties`.
+Each `professionals` row represents a professional registered in Professional Management. The
+`status` field expresses the profile lifecycle: `ACTIVE` means the professional is active and
+available within this bounded context; `INACTIVE` means the record remains registered while the
+professional is inactive. `status` is independent of `professional_type`. A professional may
+initially be created with `professional_type` set to `NULL`; an administrator later classifies the
+profile as `GENERAL_PRACTITIONER` or `SPECIALIST`. This bounded context does not currently define
+soft deletion or normal administrator deletion of professionals. The catalog administration scope
+is `specialties`.
 
 Migrations use Liquibase and are defined in
 [`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
@@ -26,7 +31,7 @@ The four migration families are `01_ddl`, `02_dml`, `03_dcl`, and `04_tcl`. The 
 intentionally has two changelog fragments: `01_ddl/changelog.yaml` and
 `01_ddl/changelog-post-dml.yaml`. The root changelog coordinates the DDL phases around `02_dml` to
 preserve the historical execution and rollback order: `001` → `001a` → `002` → `004` → `003` →
-`005`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
+`005` → `006`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
 
 Use `logicalFilePath` only for historical changesets whose physical SQL path changed during
 repository reorganization. Its value must preserve the exact historical logical path used by
@@ -36,6 +41,16 @@ explicit, documented compatibility reason.
 
 Both seed changesets need only `specialties` and the ownership ledger; creating `professionals`
 after both seed groups makes reverse-order rollback safe with its restrictive specialty foreign key.
+Migration `006` adds `professional_type` (`GENERAL_PRACTITIONER` or `SPECIALIST`) and `status`
+(`ACTIVE` or `INACTIVE`) to `professionals`. During this transition, `professional_type` is nullable
+because historical data does not establish each existing professional's type; the migration does
+not backfill or default it. `status` defaults to `ACTIVE` so inserts using the current Professional
+API contract, which omits both new fields, remain compatible. Rolling back changeset 006 drops both
+columns and its status index only when no professional records exist. If any row exists, rollback
+fails before removing anything because `professional_type` or `status` may contain a later domain
+decision; the schema cannot distinguish `ACTIVE` supplied by the default from `ACTIVE` chosen
+subsequently. No historical professional type is backfilled. An empty `professionals` table is
+therefore required to roll back 006 safely.
 `03_dcl` is reserved for database access-control changes such as roles, grants, and privileges.
 `04_tcl` is reserved for transaction-control changes when required. Both families are currently
 empty because the Professional Management database does not require these changes.
