@@ -85,6 +85,17 @@ BEGIN
           AND indexname = 'idx_professionals_specialty_id') <> 1
     THEN RAISE EXCEPTION 'Expected specialty_id index'; END IF;
 
+    IF (SELECT COUNT(*) FROM pg_index i
+        JOIN pg_attribute a ON a.attrelid = i.indrelid
+                           AND a.attname = 'status'
+                           AND a.attnum = ANY(i.indkey)
+        WHERE i.indrelid = 'public.professionals'::regclass AND i.indisvalid) <> 1
+       OR (SELECT COUNT(*) FROM pg_indexes
+           WHERE schemaname = 'public' AND tablename = 'professionals'
+             AND indexname = 'idx_professionals_status'
+             AND indexdef ILIKE '%(status)%') <> 1
+    THEN RAISE EXCEPTION 'Expected exactly one status index named idx_professionals_status'; END IF;
+
     INSERT INTO specialties (name, description)
     VALUES ('Prueba eliminación libre', 'Delete test');
     DELETE FROM specialties WHERE name = 'Prueba eliminación libre';
