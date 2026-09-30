@@ -13,3 +13,19 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/03_tables/004_create_idempotency_key.rollback.sql
             relativeToChangelogFile: true
+  # ddl-alter-009 alters idempotency_key, so it must run after ddl-tables-004
+  # creates that table. It is registered here, in the changelog fragment that
+  # runs immediately after it, rather than in 04_alter/changelog.yaml, because
+  # that fragment is included BEFORE this one and would fail on a missing table.
+  - changeSet:
+      id: ddl-alter-009
+      author: telemed
+      comment: "Add request_hash to idempotency_key so the API can detect same-key different-payload collisions."
+      changes:
+        - sqlFile:
+            path: ../04_alter/009_add_request_hash.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/009_add_request_hash.rollback.sql
+            relativeToChangelogFile: true
