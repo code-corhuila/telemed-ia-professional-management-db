@@ -215,6 +215,26 @@ BEGIN
     DELETE FROM professional_management.professionals WHERE license_number = 'TEST-SAFE-DELETE-001';
     DELETE FROM professional_management.professionals WHERE license_number = 'TEST-API-INSERT-001';
     DELETE FROM professional_management.specialties WHERE id = protected_specialty_id;
+
+    IF to_regclass('professional_management.idempotency_key') IS NULL THEN
+        RAISE EXCEPTION 'Expected table professional_management.idempotency_key';
+    END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint WHERE conname = 'pk_idempotency_key' AND contype = 'p') <> 1 THEN
+        RAISE EXCEPTION 'Expected primary key pk_idempotency_key';
+    END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint WHERE conname = 'fk_idempotency_key_professional' AND contype = 'f' AND confdeltype = 'c') <> 1 THEN
+        RAISE EXCEPTION 'Expected foreign key fk_idempotency_key_professional with ON DELETE CASCADE';
+    END IF;
+
+    IF NOT has_table_privilege('professional_management_reader', 'professional_management.idempotency_key', 'SELECT') THEN
+        RAISE EXCEPTION 'professional_management_reader lacks SELECT on idempotency_key';
+    END IF;
+
+    IF NOT has_table_privilege('professional_management_writer', 'professional_management.idempotency_key', 'INSERT') THEN
+        RAISE EXCEPTION 'professional_management_writer lacks INSERT on idempotency_key';
+    END IF;
 END;
 $$;
 
