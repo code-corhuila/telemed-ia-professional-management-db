@@ -226,6 +226,18 @@ environment with:
 docker compose -p professional-management-db-test -f docker-compose.test.yml down
 ```
 
+### Test runners
+
+- `tests/run-db-tests.ps1`: reconstructs the schema, verifies the second
+  update is a no-op, rolls back completely, verifies empty, and reapplies.
+  Runs in CI and locally.
+- `tests/run-seed-rollback-tests.ps1`: nine integration scenarios for the
+  seed ownership ledger, legacy checksums, and rollback ordering. Runs
+  locally only; it depends on Windows shell features not available in the
+  GitHub Actions runner.
+- `tests/sql/professional-schema-tests.sql`: schema, constraints, roles,
+  privileges, and seed assertions. Runs in CI (via psql) and locally.
+
 ## Manual debugging
 
 While the automated test is running, use the generated project name printed by the runner to
