@@ -229,6 +229,15 @@ BEGIN
         RAISE EXCEPTION 'Expected foreign key fk_idempotency_key_professional with ON DELETE CASCADE';
     END IF;
 
+    IF (SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_schema = 'professional_management'
+          AND table_name = 'idempotency_key'
+          AND column_name = 'request_hash'
+          AND data_type = 'text'
+          AND is_nullable = 'YES') <> 1 THEN
+        RAISE EXCEPTION 'Expected nullable text column professional_management.idempotency_key.request_hash';
+    END IF;
+
     IF NOT has_table_privilege('professional_management_reader', 'professional_management.idempotency_key', 'SELECT') THEN
         RAISE EXCEPTION 'professional_management_reader lacks SELECT on idempotency_key';
     END IF;
