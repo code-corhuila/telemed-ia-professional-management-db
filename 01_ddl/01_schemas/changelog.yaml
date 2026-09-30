@@ -11,3 +11,4 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/01_schemas/001_create_schema_professional_management.rollback.sql
             relativeToChangelogFile: true
+            splitStatements: false
