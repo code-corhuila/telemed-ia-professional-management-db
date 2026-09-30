@@ -22,6 +22,48 @@ BEGIN
        OR to_regclass('professional_management.specialty_seed_ownership') IS NULL
     THEN RAISE EXCEPTION 'Expected specialties and professionals tables'; END IF;
 
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader' AND NOT rolcanlogin) THEN
+        RAISE EXCEPTION 'professional_management_reader NOLOGIN role is missing';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_writer' AND NOT rolcanlogin) THEN
+        RAISE EXCEPTION 'professional_management_writer NOLOGIN role is missing';
+    END IF;
+    IF NOT pg_has_role('professional_management_writer', 'professional_management_reader', 'MEMBER') THEN
+        RAISE EXCEPTION 'professional_management_writer must inherit the reader role';
+    END IF;
+    IF NOT has_schema_privilege('professional_management_reader', 'professional_management', 'USAGE') THEN
+        RAISE EXCEPTION 'professional_management_reader lacks USAGE on professional_management schema';
+    END IF;
+    IF NOT has_schema_privilege('professional_management_writer', 'professional_management', 'USAGE') THEN
+        RAISE EXCEPTION 'professional_management_writer lacks USAGE on professional_management schema';
+    END IF;
+    IF NOT has_table_privilege('professional_management_reader', 'professional_management.professionals', 'SELECT') THEN
+        RAISE EXCEPTION 'professional_management_reader lacks SELECT on professionals';
+    END IF;
+    IF has_table_privilege('professional_management_reader', 'professional_management.professionals', 'INSERT') THEN
+        RAISE EXCEPTION 'professional_management_reader unexpectedly has INSERT on professionals';
+    END IF;
+    IF NOT has_table_privilege('professional_management_writer', 'professional_management.professionals', 'SELECT,INSERT,UPDATE,DELETE') THEN
+        RAISE EXCEPTION 'professional_management_writer lacks CRUD privileges on professionals';
+    END IF;
+    IF NOT has_sequence_privilege('professional_management_writer',
+        pg_get_serial_sequence('professional_management.professionals', 'id'), 'USAGE') THEN
+        RAISE EXCEPTION 'professional_management_writer lacks USAGE on professional sequences';
+    END IF;
+
+    EXECUTE 'CREATE TABLE professional_management.grant_default_probe (id integer)';
+    IF NOT has_table_privilege('professional_management_reader', 'professional_management.grant_default_probe', 'SELECT')
+       OR has_table_privilege('professional_management_reader', 'professional_management.grant_default_probe', 'INSERT')
+       OR NOT has_table_privilege('professional_management_writer', 'professional_management.grant_default_probe', 'SELECT,INSERT,UPDATE,DELETE') THEN
+        RAISE EXCEPTION 'Default table privileges were not applied to a new table';
+    END IF;
+    EXECUTE 'CREATE SEQUENCE professional_management.grant_default_probe_seq';
+    IF NOT has_sequence_privilege('professional_management_writer', 'professional_management.grant_default_probe_seq', 'USAGE') THEN
+        RAISE EXCEPTION 'Default sequence privileges were not applied to a new sequence';
+    END IF;
+    EXECUTE 'DROP SEQUENCE professional_management.grant_default_probe_seq';
+    EXECUTE 'DROP TABLE professional_management.grant_default_probe';
+
     SELECT COUNT(*) INTO actual_count
     FROM professional_management.specialties
     WHERE (name, description) IN (

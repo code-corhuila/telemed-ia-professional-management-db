@@ -28,8 +28,19 @@ $containerCreated = $false
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker is required.' }
 
 function D([string[]]$DockerArgs) {
-    & docker @DockerArgs
-    if ($LASTEXITCODE -ne 0) { throw "Docker failed: $($DockerArgs -join ' ')" }
+    # Windows PowerShell 5.1 does not redirect native stderr with *> $null or 2>$null.
+    # A benign NOTICE/WARNING from docker/psql would be treated as a fatal error under
+    # $ErrorActionPreference = 'Stop'. Flip to 'Continue' for the native call, merge
+    # stderr into stdout, print it, and evaluate $LASTEXITCODE ourselves.
+    $previousEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & docker @DockerArgs 2>&1 | ForEach-Object { Write-Host $_ }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ($exitCode -ne 0) { throw "Docker failed: $($DockerArgs -join ' ')" }
 }
 function P([string]$Db, [string]$Sql, [string[]]$Options = @()) {
     D (@('exec', $container, 'psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1',
@@ -75,11 +86,29 @@ function FixtureRow([string]$Db, [long]$SpecialtyId) {
     A $Db "EXISTS (SELECT 1 FROM $schema.specialties WHERE id=$SpecialtyId AND description='$fixture')" "Fixture row changed: $SpecialtyId"
 }
 function Scalar([string]$Db, [string]$Sql) {
-    $out = & docker exec $container psql -X -q -t -A -v ON_ERROR_STOP=1 -U test_user -d $Db -c $Sql
-    if ($LASTEXITCODE -ne 0) { throw "Could not query $Db." }
+    # Same PowerShell 5.1 caveat as D: capture stdout of a native command without
+    # letting a stderr line trip $ErrorActionPreference = 'Stop'.
+    $previousEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $out = & docker exec $container psql -X -q -t -A -v ON_ERROR_STOP=1 -U test_user -d $Db -c $Sql 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ($exitCode -ne 0) { throw "Could not query $Db." }
     return [long](($out | Where-Object { "$_".Trim() -match '^\d+$' } | Select-Object -Last 1).Trim())
 }
-function NewDb([string]$Db) { P 'postgres' "CREATE DATABASE $Db;" }
+function NewDb([string]$Db) {
+    foreach ($candidate in $databases) {
+        if ($candidate -eq $Db) { continue }
+        D @('exec', $container, 'psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1',
+            '-U', 'test_user', '-d', 'postgres',
+            '-c', "DROP DATABASE IF EXISTS $candidate WITH (FORCE)")
+    }
+    P 'postgres' 'DROP ROLE IF EXISTS professional_management_writer; DROP ROLE IF EXISTS professional_management_reader;'
+    P 'postgres' "CREATE DATABASE $Db;"
+}
 function Seven([string]$Db) {
     $schema = DomainSchema $Db
     A $Db "(SELECT count(*) FROM $schema.specialties)=7" 'Expected seven specialties.'
@@ -110,21 +139,35 @@ try {
     $containerCreated = $true
     $ready = $false
     for ($i=0; $i -lt 60; $i++) {
-        & docker exec $container pg_isready -U test_user -d postgres *> $null
-        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+        $previousEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & docker exec $container pg_isready -U test_user -d postgres 2>&1 | Out-Null
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousEap
+        }
+        if ($exitCode -eq 0) { $ready = $true; break }
         Start-Sleep 2
     }
     if (-not $ready) { throw 'Disposable PostgreSQL did not become ready.' }
 
     $fresh = $databases[0]; NewDb $fresh; L $fresh @('update'); L $fresh @('validate')
-    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-indexes-001'))=11" 'Expected eleven changesets.'
+    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-indexes-001','001-create-roles','001-grants'))=13" 'Expected thirteen changesets.'
     Seven $fresh; Own $fresh '002-seed-specialties' 4; Own $fresh '004-seed-additional-specialties' 3
     Schema $fresh
     L $fresh @('update')
-    A $fresh '(SELECT count(*) FROM databasechangelog)=11' 'Second update applied additional changesets.'
+    A $fresh '(SELECT count(*) FROM databasechangelog)=13' 'Second update applied additional changesets.'
     Seven $fresh; Own $fresh '002-seed-specialties' 4; Own $fresh '004-seed-additional-specialties' 3
     Write-Host 'PASS second update is idempotent.'
 
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "NOT has_schema_privilege('professional_management_reader','professional_management','USAGE') AND NOT has_table_privilege('professional_management_writer','professional_management.professionals','INSERT')" 'Grant rollback must revoke current schema and table privileges.'
+    P $fresh 'CREATE TABLE professional_management.grant_rollback_probe (id integer)'
+    A $fresh "NOT has_table_privilege('professional_management_reader','professional_management.grant_rollback_probe','SELECT') AND NOT has_table_privilege('professional_management_writer','professional_management.grant_rollback_probe','INSERT')" 'Grant rollback must remove default privileges for future tables.'
+    P $fresh 'DROP TABLE professional_management.grant_rollback_probe'
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('professional_management_reader','professional_management_writer'))" 'Role rollback must remove both DCL roles.'
     L $fresh @('rollback-count','--count','1')
     A $fresh "NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='professional_management' AND tablename='specialty_seed_ownership' AND indexname='idx_specialty_seed_ownership_specialty_id')" 'Rollback index changeset must remove its ownership index.'
     L $fresh @('rollback-count','--count','1')
@@ -148,6 +191,20 @@ try {
     A $fresh "to_regclass('public.specialty_seed_ownership') IS NULL" 'Ownership table remains.'
     L $fresh @('rollback-count','--count','1')
     A $fresh "to_regclass('public.specialties') IS NULL" '001 did not remove specialties.'
+    P $fresh 'CREATE TABLE professional_management.rollback_guard_probe (id integer)'
+    $rollbackPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $rollbackFailure = & docker run --rm --network $network --workdir /workspace --mount "type=bind,source=$root,target=/workspace,readonly" `
+            liquibase/liquibase:4.31 "--url=jdbc:postgresql://${container}:5432/$fresh" --username=test_user "--password=$password" `
+            --changelog-file=changelog/changelog-master.yaml rollback-count --count 1 2>&1
+        $rollbackExitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $rollbackPreference }
+    if ($rollbackExitCode -eq 0 -or ($rollbackFailure -join "`n") -notmatch 'Rollback of schema creation refused: professional_management still contains objects') {
+        throw 'Schema rollback must refuse to drop a non-empty professional_management schema.'
+    }
+    A $fresh "to_regclass('professional_management.rollback_guard_probe') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='professional_management')" 'Rejected schema rollback must preserve the schema and its object.'
+    P $fresh 'DROP TABLE professional_management.rollback_guard_probe'
     L $fresh @('rollback-count','--count','1')
     A $fresh "NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='professional_management')" 'Schema changeset rollback must remove the empty domain schema.'
     L $fresh @('update'); Seven $fresh
@@ -158,14 +215,14 @@ try {
     Schema $fresh
     Write-Host 'PASS fresh apply, ownership, staged rollbacks, reapply, and schema tests.'
 
-    $full = $databases[1]; NewDb $full; L $full @('update'); L $full @('rollback-count','--count','11')
+    $full = $databases[1]; NewDb $full; L $full @('update'); L $full @('rollback-count','--count','13')
     A $full "to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL AND to_regclass('professional_management.specialties') IS NULL AND to_regclass('professional_management.professionals') IS NULL AND to_regclass('professional_management.specialty_seed_ownership') IS NULL" 'Full rollback left domain tables.'
     A $full "NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='professional_management')" 'Full rollback left the domain schema.'
-    A $full "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-indexes-001'))=0" 'Full rollback left changeset history.'
+    A $full "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-indexes-001','001-create-roles','001-grants'))=0" 'Full rollback left changeset history.'
     L $full @('update'); Seven $full
     Own $full '002-seed-specialties' 4; Own $full '004-seed-additional-specialties' 3
     Schema $full
-    Write-Host 'PASS rollback-count=11, table/schema/history removal, reapply, and schema tests.'
+    Write-Host 'PASS rollback-count=13, table/schema/history removal, reapply, and schema tests.'
 
     Collision $databases[2] 'Medicina General' "'Medicina General'" '002-seed-specialties' 3 1 3
     Collision $databases[3] 'Neurología' $neurology '004-seed-additional-specialties' 2 5 4
@@ -178,6 +235,8 @@ try {
     $legacyMode = $false; L $legacy @('validate'); L $legacy @('update')
     A $legacy "to_regclass('professional_management.specialty_seed_ownership') IS NOT NULL AND (SELECT count(*) FROM professional_management.specialty_seed_ownership)=0" 'Legacy rows were backfilled.'
     Seven $legacy
+    L $legacy @('rollback-count', '--count', '1')
+    L $legacy @('rollback-count', '--count', '1')
     L $legacy @('rollback-count', '--count', '1')
     L $legacy @('rollback-count', '--count', '1')
     L $legacy @('rollback-count', '--count', '1')
@@ -215,7 +274,7 @@ try {
     $fk = $databases[5]; NewDb $fk; L $fk @('update')
     $generalId = Scalar $fk "SELECT id FROM professional_management.specialties WHERE name='Medicina General'"
     P $fk "INSERT INTO professional_management.professionals(identity_user_id,license_number,specialty_id,years_experience,professional_type,status) VALUES (900000001,'TEST-ROLLBACK-002-001',$generalId,0,'GENERAL_PRACTITIONER','ACTIVE')"
-    L $fk @('rollback-count', '--count', '3')
+    L $fk @('rollback-count', '--count', '5')
     A $fk "to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professionals') IS NULL AND EXISTS (SELECT 1 FROM public.professionals WHERE license_number='TEST-ROLLBACK-002-001')" 'Rollback 007 must return tables to public and preserve the professional.'
     $rollbackPreference = $ErrorActionPreference
     try {
@@ -253,8 +312,8 @@ try {
     $adminId = Scalar $adminDelete "INSERT INTO professional_management.specialties(name,description) VALUES ($neurology,'administrator replacement') RETURNING id"
     if ($adminId -eq $ownedId) { throw 'Replacement specialty unexpectedly reused the deleted ID.' }
 
-    L $adminDelete @('rollback-count','--count','4')
-    A $adminDelete "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status') AND to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professionals') IS NULL" 'Rollbacks 001-indexes, 008, 007, and 006 must restore tables to public and remove lifecycle columns.'
+    L $adminDelete @('rollback-count','--count','6')
+    A $adminDelete "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status') AND to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professionals') IS NULL" 'Rollbacks for grants, roles, indexes, 008, 007, and 006 must restore tables to public and remove lifecycle columns.'
     L $adminDelete @('rollback-count','--count','1')
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Ownership FK rollback must restore NO ACTION.'
     L $adminDelete @('rollback-count','--count','1')
@@ -269,7 +328,7 @@ try {
     L $transition @('update'); Schema $transition
     A $transition "EXISTS (SELECT 1 FROM professional_management.professionals WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE')" 'Migration 006 must preserve unknown professional_type and default status to ACTIVE.'
 
-    L $transition @('rollback-count', '--count', '3')
+    L $transition @('rollback-count', '--count', '5')
 
     $rollbackPreference = $ErrorActionPreference
     try {
