@@ -1,0 +1,8 @@
+databaseChangeLog:
+  - include:
+      file: 005-cascade-deleted-specialty-ownership.sql
+      relativeToChangelogFile: true
+      logicalFilePath: changes/005-cascade-deleted-specialty-ownership.sql
+  - include:
+      file: 006-add-professional-type-and-status.sql
+      relativeToChangelogFile: true
