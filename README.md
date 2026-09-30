@@ -150,6 +150,26 @@ delete a later administrator-created specialty with the same name.
 
 This repository does not implement an API delete operation.
 
+## Idempotency
+
+The `idempotency_key` table stores the `Idempotency-Key` HTTP header for
+professional creation requests. The service writes the professional and its
+idempotency key in the same transaction. If the same key is received again,
+the service reverts and returns the originally created professional. The `key`
+column is constrained to 8-128 characters, matching the database standard.
+
+## Schema qualification
+
+Domain tables live in `professional_management`, not in `public`. Consumers
+of this database must either:
+
+- qualify table names (`professional_management.professionals`), or
+- set `search_path = professional_management, public` in the connection.
+
+Relying on the default `search_path = public` and unqualified names will fail
+with `relation does not exist`. The `-api` repository is responsible for its
+own connection configuration; this repository cannot set it.
+
 ## Running schema tests
 
 Docker Desktop is required. Liquibase and `psql` run inside PostgreSQL/Liquibase containers, so
