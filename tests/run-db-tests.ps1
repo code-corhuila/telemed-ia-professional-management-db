@@ -1,30 +1,40 @@
 [CmdletBinding()]
-param([string]$ComposeCommand = $env:COMPOSE_CMD)
+param(
+    [string]$ComposeCommand = $env:COMPOSE_CMD
+)
 
 $ErrorActionPreference = 'Stop'
-if ([string]::IsNullOrWhiteSpace($ComposeCommand)) { $ComposeCommand = 'docker compose' }
-if ($ComposeCommand -eq 'docker compose') { $composeAvailable = Get-Command docker -ErrorAction SilentlyContinue }
-else { $composeAvailable = Get-Command $ComposeCommand -ErrorAction SilentlyContinue }
-if (-not $composeAvailable) { throw 'Docker Desktop is required to run the database tests.' }
 
-$root = Split-Path -Parent $PSScriptRoot
-$composeFile = Join-Path $root 'docker-compose.test.yml'
-$project = "professional-db-test-$PID-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
-$composeArgs = @('-p', $project, '-f', $composeFile)
-$previousPassword = $env:TEST_DB_PASSWORD
+if ([string]::IsNullOrWhiteSpace($ComposeCommand)) {
+    $ComposeCommand = 'docker compose'
+}
+
+if ($ComposeCommand -eq 'docker compose') {
+    $composeAvailable = Get-Command docker -ErrorAction SilentlyContinue
+} else {
+    $composeAvailable = Get-Command $ComposeCommand -ErrorAction SilentlyContinue
+}
+if (-not $composeAvailable) {
+    throw 'Docker Desktop is required to run the database tests.'
+}
+
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$composeFile = Join-Path $repositoryRoot 'docker-compose.test.yml'
+$projectName = "professional-db-test-$PID-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+$composeArgs = @('-p', $projectName, '-f', $composeFile)
 $previousUser = $env:TEST_DB_USER
-$bytes = New-Object byte[] 32
-$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
-$env:TEST_DB_PASSWORD = [BitConverter]::ToString($bytes).Replace('-', '')
+$previousPassword = $env:TEST_DB_PASSWORD
+$passwordBytes = New-Object byte[] 32
+$random = [Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $random.GetBytes($passwordBytes)
+} finally {
+    $random.Dispose()
+}
 $env:TEST_DB_USER = 'test_user'
+$env:TEST_DB_PASSWORD = [BitConverter]::ToString($passwordBytes).Replace('-', '')
 $testPassword = $env:TEST_DB_PASSWORD
 
-function Invoke-Compose([string[]]$Arguments) {
-    if ($ComposeCommand -eq 'docker compose') { & docker compose @composeArgs @Arguments }
-    else { & $ComposeCommand @composeArgs @Arguments }
-    if ($LASTEXITCODE -ne 0) { throw "Docker Compose failed with exit code $LASTEXITCODE." }
-}
 function Format-ProcessArgument {
     param([string]$Value)
 
@@ -85,6 +95,7 @@ try {
     $interruptSubscription = Register-ObjectEvent -InputObject ([Console]) -EventName 'CancelKeyPress' -MessageData @{
         ComposeCommand   = $ComposeCommand
         ComposeArgs      = $composeArgs
+        PreviousUser     = $previousUser
         PreviousPassword = $previousPassword
         TestPassword     = $testPassword
     } -Action {
@@ -94,6 +105,11 @@ try {
             Invoke-IsolatedComposeDown -ComposeCommand $data.ComposeCommand -ComposeArgs $data.ComposeArgs -Password $data.TestPassword
         } catch {
             Write-Warning "Interrupt cleanup failed to run Docker Compose: $_"
+        }
+        if ($null -eq $data.PreviousUser) {
+            Remove-Item Env:\TEST_DB_USER -ErrorAction SilentlyContinue
+        } else {
+            $env:TEST_DB_USER = $data.PreviousUser
         }
         if ($null -eq $data.PreviousPassword) {
             Remove-Item Env:\TEST_DB_PASSWORD -ErrorAction SilentlyContinue
@@ -109,26 +125,57 @@ try {
     Write-Warning "Could not register interrupt cleanup handler: $_"
 }
 
-function Invoke-Liquibase([string[]]$Command) {
+function Invoke-Compose {
+    param([string[]]$Arguments)
+
+    if ($ComposeCommand -eq 'docker compose') {
+        & docker compose @composeArgs @Arguments
+    } else {
+        & $ComposeCommand @composeArgs @Arguments
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Docker Compose failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Invoke-Liquibase {
+    param([string[]]$Command)
+
     Invoke-Compose (@('run', '--rm', 'liquibase') + $Command)
 }
-function Invoke-Sql([string]$Query) {
-    $result = Invoke-Compose @('exec', '-T', '-e', "PGPASSWORD=$env:TEST_DB_PASSWORD", 'postgres',
-        'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '--host=127.0.0.1',
-        '-U', $env:TEST_DB_USER, '-d', 'professional_management_test', '-c', $Query)
+
+function Invoke-Sql {
+    param([string]$Query)
+
+    $result = Invoke-Compose (@(
+        'exec', '-T', '-e', "PGPASSWORD=$env:TEST_DB_PASSWORD", 'postgres', 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1',
+        '--host=127.0.0.1', '-U', 'test_user', '-d', 'professional_management_test', '-c', $Query
+    ))
+    if ($LASTEXITCODE -ne 0) {
+        throw 'PostgreSQL assertion query failed.'
+    }
     return ($result -join '').Trim()
 }
-function Assert-Sql([string]$Query, [string]$Message) {
-    if ((Invoke-Sql $Query) -ne 't') { throw $Message }
+
+function Assert-Sql {
+    param([string]$Query, [string]$Message)
+
+    if ((Invoke-Sql $Query) -ne 't') {
+        throw $Message
+    }
 }
+
 function Assert-Schema {
-    Invoke-Compose @('exec', '-T', '-e', "PGPASSWORD=$env:TEST_DB_PASSWORD", 'postgres',
-        'psql', '-X', '-v', 'ON_ERROR_STOP=1', '--host=127.0.0.1', '-U', $env:TEST_DB_USER,
-        '-d', 'professional_management_test', '-f', '/tests/professional-schema-tests.sql')
+    Invoke-Compose @(
+        'exec', '-T', '-e', "PGPASSWORD=$env:TEST_DB_PASSWORD", 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+        '--host=127.0.0.1',
+        '-U', 'test_user', '-d', 'professional_management_test',
+        '-f', '/tests/professional-schema-tests.sql'
+    )
 }
 
 $failure = $null
-Write-Host "Using isolated Docker Compose project: $project"
+Write-Host "Using isolated Docker Compose project: $projectName"
 try {
     Invoke-Compose @('up', '-d', 'postgres')
 
@@ -191,15 +238,25 @@ try {
             Write-Warning "Docker cleanup also failed: $_"
         }
     }
-    if ($null -eq $previousPassword) { Remove-Item Env:\TEST_DB_PASSWORD -ErrorAction SilentlyContinue }
-    else { $env:TEST_DB_PASSWORD = $previousPassword }
-    if ($null -eq $previousUser) { Remove-Item Env:\TEST_DB_USER -ErrorAction SilentlyContinue }
-    else { $env:TEST_DB_USER = $previousUser }
+    if ($null -eq $previousUser) {
+        Remove-Item Env:\TEST_DB_USER -ErrorAction SilentlyContinue
+    } else {
+        $env:TEST_DB_USER = $previousUser
+    }
+    if ($null -eq $previousPassword) {
+        Remove-Item Env:\TEST_DB_PASSWORD -ErrorAction SilentlyContinue
+    } else {
+        $env:TEST_DB_PASSWORD = $previousPassword
+    }
 }
+
 if ($interruptSubscription) {
     Unregister-Event -SourceIdentifier $interruptSubscription.Name -ErrorAction SilentlyContinue
     Remove-Job -Id $interruptSubscription.Id -Force -ErrorAction SilentlyContinue
 }
 
-if ($null -ne $failure) { throw $failure }
+if ($null -ne $failure) {
+    throw $failure
+}
+
 Write-Host 'Fresh install, idempotent update, full rollback, and reapplication passed.'
