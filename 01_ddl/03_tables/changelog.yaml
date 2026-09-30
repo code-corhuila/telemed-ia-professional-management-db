@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - include:
+      file: 001-create-specialties.sql
+      relativeToChangelogFile: true
+      logicalFilePath: changes/001-create-specialties.sql
+  - include:
+      file: 001a-create-specialty-seed-ownership.sql
+      relativeToChangelogFile: true
+      logicalFilePath: changes/001a-create-specialty-seed-ownership.sql

@@ -1,0 +1,12 @@
+# Reserved for future DCL changesets (roles, grants, and policies).
+# This database currently has no DCL objects to manage.
+databaseChangeLog:
+  - include:
+      file: 00_roles/changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: 01_grants/changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: 02_policies/changelog.yaml
+      relativeToChangelogFile: true

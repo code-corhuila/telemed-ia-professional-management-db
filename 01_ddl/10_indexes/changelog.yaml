@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - changeSet:
+      id: ddl-indexes-001
+      author: telemed
+      comment: "Index the specialty reference in the seed ownership ledger."
+      changes:
+        - sqlFile:
+            path: 001_add_specialty_seed_ownership_index.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/001_add_specialty_seed_ownership_index.rollback.sql
+            relativeToChangelogFile: true

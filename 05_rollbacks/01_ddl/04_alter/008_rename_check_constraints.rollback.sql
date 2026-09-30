@@ -1,0 +1,3 @@
+ALTER TABLE professional_management.professionals RENAME CONSTRAINT chk_professionals_status TO ck_professionals_status;
+ALTER TABLE professional_management.professionals RENAME CONSTRAINT chk_professionals_professional_type TO ck_professionals_professional_type;
+ALTER TABLE professional_management.professionals RENAME CONSTRAINT chk_professionals_years_experience_nonnegative TO ck_professionals_years_experience_nonnegative;

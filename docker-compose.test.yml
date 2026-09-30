@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: professional_management_test
+      POSTGRES_USER: ${TEST_DB_USER:?TEST_DB_USER must be set}
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD:?TEST_DB_PASSWORD must be set}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - ./tests/sql:/tests:ro
+
+  liquibase:
+    image: liquibase/liquibase:4.31
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /workspace
+    volumes:
+      - ./changelog:/workspace/changelog:ro
+      - ./01_ddl:/workspace/01_ddl:ro
+      - ./02_dml:/workspace/02_dml:ro
+      - ./03_dcl:/workspace/03_dcl:ro
+      - ./04_tcl:/workspace/04_tcl:ro
+      - ./05_rollbacks:/workspace/05_rollbacks:ro
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:postgresql://postgres:5432/professional_management_test
+      LIQUIBASE_COMMAND_USERNAME: ${TEST_DB_USER:?TEST_DB_USER must be set}
+      LIQUIBASE_COMMAND_PASSWORD: ${TEST_DB_PASSWORD:?TEST_DB_PASSWORD must be set}
+      LIQUIBASE_COMMAND_CHANGELOG_FILE: changelog/changelog-master.yaml

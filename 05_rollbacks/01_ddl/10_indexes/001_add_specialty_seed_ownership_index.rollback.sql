@@ -1,0 +1,1 @@
+DROP INDEX professional_management.idx_specialty_seed_ownership_specialty_id;
