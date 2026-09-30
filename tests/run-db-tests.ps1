@@ -131,31 +131,46 @@ $failure = $null
 Write-Host "Using isolated Docker Compose project: $project"
 try {
     Invoke-Compose @('up', '-d', 'postgres')
-    $update = Invoke-Liquibase @('update') | Out-String
-    if ($update -notmatch '(?m)^\s*Run:\s+(\d+)\s*$' -or [int]$Matches[1] -ne 6) {
-        throw 'Fresh Liquibase update did not apply all six changesets.'
+
+    $firstUpdate = Invoke-Liquibase @('update') | Out-String
+    if ($firstUpdate -notmatch '(?m)^\s*Run:\s+(\d+)\s*$') {
+        throw 'Fresh Liquibase update did not report its changeset count.'
+    }
+    $expectedChangesets = [int]$Matches[1]
+    if ($expectedChangesets -lt 1) {
+        throw 'Fresh Liquibase update did not apply any changesets.'
+    }
+
+    Assert-Schema
+    Assert-Sql "SELECT (SELECT count(*) FROM databasechangelog) = $expectedChangesets" `
+        'Fresh update did not apply all reported changesets.'
+
+    $appliedBefore = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
+    $secondUpdate = Invoke-Liquibase @('update') | Out-String
+    if ($secondUpdate -notmatch '(?m)^\s*Run:\s+0\s*$') {
+        throw 'Repeated Liquibase update did not report zero changesets.'
+    }
+    $appliedAfter = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
+    if ($appliedAfter -ne $appliedBefore) {
+        throw 'Repeated update applied additional changesets.'
+    }
+
+    Invoke-Liquibase @('rollback-count', "$expectedChangesets")
+    Assert-Sql "SELECT to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL AND to_regclass('professional_management.specialties') IS NULL AND to_regclass('professional_management.professionals') IS NULL AND to_regclass('professional_management.specialty_seed_ownership') IS NULL" `
+        'Domain tables remain after complete rollback.'
+    Assert-Sql "SELECT NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='professional_management')" `
+        'Professional Management schema remains after complete rollback.'
+    Assert-Sql "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('public','professional_management') AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')) = 0" `
+        'Unexpected domain tables remain after complete rollback.'
+    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 0' 'Liquibase changeset history remains after rollback.'
+
+    $reapplication = Invoke-Liquibase @('update') | Out-String
+    if ($reapplication -notmatch '(?m)^\s*Run:\s+(\d+)\s*$' -or [int]$Matches[1] -ne $expectedChangesets) {
+        throw 'Reapplication did not run the complete changeset set.'
     }
     Assert-Schema
-    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog)=6' 'Fresh update has incorrect changeset history.'
-
-    $before = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
-    $again = Invoke-Liquibase @('update') | Out-String
-    if ($again -notmatch '(?m)^\s*Run:\s+0\s*$') { throw 'Second update was not a no-op.' }
-    if ((Invoke-Sql 'SELECT count(*) FROM databasechangelog') -ne $before) {
-        throw 'Second update changed the databasechangelog.'
-    }
-
-    Invoke-Liquibase @('rollback-count', '6')
-    Assert-Sql "SELECT to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL" 'Domain tables remain after rollback.'
-    Assert-Sql "SELECT count(*)=0 FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')" 'Unexpected domain tables remain.'
-    Assert-Sql 'SELECT count(*)=0 FROM databasechangelog' 'Changeset history remains after rollback.'
-
-    $reapply = Invoke-Liquibase @('update') | Out-String
-    if ($reapply -notmatch '(?m)^\s*Run:\s+(\d+)\s*$' -or [int]$Matches[1] -ne 6) {
-        throw 'Reapplication did not run all six changesets.'
-    }
-    Assert-Schema
-    Assert-Sql 'SELECT count(*)=6 FROM databasechangelog' 'Reapplication did not restore all changesets.'
+    Assert-Sql "SELECT (SELECT count(*) FROM databasechangelog) = $expectedChangesets" `
+        'Reapplication did not restore all changesets.'
 } catch {
     $failure = $_
 } finally {
