@@ -11,3 +11,16 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/03_dcl/01_grants/001_grants.rollback.sql
             relativeToChangelogFile: true
+  - changeSet:
+      id: dcl-grants-002
+      author: telemed
+      comment: "Explicit grants on idempotency_key to close the default-privileges gap."
+      changes:
+        - sqlFile:
+            path: 002_grant_idempotency_key.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/03_dcl/01_grants/002_grant_idempotency_key.rollback.sql
+            relativeToChangelogFile: true
+
