@@ -1,0 +1,65 @@
+name: Database CI
+
+on:
+  pull_request:
+    branches: [develop, qa, main]
+  push:
+    branches: [develop, qa, main]
+
+jobs:
+  rebuild:
+    name: Rebuild from empty database
+    runs-on: ubuntu-latest
+    env:
+      TEST_DB_USER: test_user
+      TEST_DB_PASSWORD: ci-disposable-password
+      COMPOSE_PROJECT_NAME: professional-db-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start PostgreSQL
+        run: docker compose -f docker-compose.test.yml up -d postgres
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose -f docker-compose.test.yml exec -T postgres \
+                 pg_isready -U "$TEST_DB_USER" -d professional_management_test; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready" >&2
+          exit 1
+
+      - name: Liquibase update (fresh)
+        run: docker compose -f docker-compose.test.yml run --rm liquibase update
+
+      - name: Liquibase update (must apply zero changesets)
+        run: |
+          output=$(docker compose -f docker-compose.test.yml run --rm liquibase update 2>&1)
+          echo "$output"
+          echo "$output" | grep -qE 'Run:\s+0' \
+            || { echo "Second update applied changesets" >&2; exit 1; }
+
+      - name: Liquibase rollback (all)
+        run: docker compose -f docker-compose.test.yml run --rm liquibase rollback-count 999
+
+      - name: Verify schema is empty after rollback
+        run: |
+          count=$(docker compose -f docker-compose.test.yml exec -T postgres \
+            psql -U "$TEST_DB_USER" -d professional_management_test -tAc \
+            "SELECT count(*) FROM information_schema.tables \
+             WHERE table_schema='public' AND table_type='BASE TABLE' \
+             AND table_name NOT IN ('databasechangelog','databasechangeloglock')")
+          echo "Domain tables remaining: $count"
+          [ "$count" = "0" ] || { echo "Domain tables remain after rollback" >&2; exit 1; }
+
+      - name: Liquibase update (reapply)
+        run: docker compose -f docker-compose.test.yml run --rm liquibase update
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker-compose.test.yml down --volumes --remove-orphans
