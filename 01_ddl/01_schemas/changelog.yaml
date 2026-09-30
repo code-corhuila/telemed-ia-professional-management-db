@@ -1,1 +1,13 @@
-databaseChangeLog: []
+databaseChangeLog:
+  - changeSet:
+      id: ddl-schemas-001
+      author: telemed
+      comment: "Create the professional_management schema for domain tables."
+      changes:
+        - sqlFile:
+            path: 001_create_schema_professional_management.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/01_schemas/001_create_schema_professional_management.rollback.sql
+            relativeToChangelogFile: true
