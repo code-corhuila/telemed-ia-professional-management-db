@@ -6,6 +6,7 @@ DO $$
 DECLARE
     actual_count INTEGER;
     protected_specialty_id BIGINT;
+    test_professional_id BIGINT;
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'r'
@@ -215,6 +216,76 @@ BEGIN
     DELETE FROM professional_management.professionals WHERE license_number = 'TEST-SAFE-DELETE-001';
     DELETE FROM professional_management.professionals WHERE license_number = 'TEST-API-INSERT-001';
     DELETE FROM professional_management.specialties WHERE id = protected_specialty_id;
+
+    IF to_regclass('professional_management.idempotency_key') IS NULL THEN
+        RAISE EXCEPTION 'Expected table professional_management.idempotency_key';
+    END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint WHERE conname = 'pk_idempotency_key' AND contype = 'p') <> 1 THEN
+        RAISE EXCEPTION 'Expected primary key pk_idempotency_key';
+    END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint WHERE conname = 'fk_idempotency_key_professional' AND contype = 'f' AND confdeltype = 'c') <> 1 THEN
+        RAISE EXCEPTION 'Expected foreign key fk_idempotency_key_professional with ON DELETE CASCADE';
+    END IF;
+
+    IF NOT has_table_privilege('professional_management_reader', 'professional_management.idempotency_key', 'SELECT') THEN
+        RAISE EXCEPTION 'professional_management_reader lacks SELECT on idempotency_key';
+    END IF;
+
+    IF NOT has_table_privilege('professional_management_writer', 'professional_management.idempotency_key', 'INSERT') THEN
+        RAISE EXCEPTION 'professional_management_writer lacks INSERT on idempotency_key';
+    END IF;
+
+    -- A real professional is required so that the key length CHECK is the only
+    -- constraint that can reject the negative cases below. Inserting a NULL
+    -- professional_id would be refused by the NOT NULL constraint instead, and
+    -- the test would pass without ever exercising chk_idempotency_key_length.
+    INSERT INTO professional_management.professionals
+        (identity_user_id, license_number, specialty_id, years_experience)
+    SELECT 999999999, 'TEST-IDEMP-LEN', id, 0
+    FROM professional_management.specialties WHERE name = 'Medicina General';
+
+    SELECT id INTO test_professional_id FROM professional_management.professionals
+    WHERE license_number = 'TEST-IDEMP-LEN';
+
+    IF test_professional_id IS NULL THEN
+        RAISE EXCEPTION 'Expected a test professional for the idempotency_key length checks';
+    END IF;
+
+    -- CHECK length: reject keys shorter than 8 characters
+    BEGIN
+        INSERT INTO professional_management.idempotency_key (key, professional_id)
+        VALUES ('1234567', test_professional_id);
+        RAISE EXCEPTION 'CHECK should reject a 7-char key';
+    EXCEPTION
+        WHEN check_violation THEN NULL;
+    END;
+
+    -- CHECK length: reject keys longer than 128 characters
+    BEGIN
+        INSERT INTO professional_management.idempotency_key (key, professional_id)
+        VALUES (repeat('x', 129), test_professional_id);
+        RAISE EXCEPTION 'CHECK should reject a 129-char key';
+    EXCEPTION
+        WHEN check_violation THEN NULL;
+    END;
+
+    -- Boundary values 8 and 128 characters are accepted
+    INSERT INTO professional_management.idempotency_key (key, professional_id)
+    VALUES ('12345678', test_professional_id);
+    INSERT INTO professional_management.idempotency_key (key, professional_id)
+    VALUES (repeat('x', 128), test_professional_id);
+
+    IF NOT EXISTS (SELECT 1 FROM professional_management.idempotency_key
+                   WHERE professional_id = test_professional_id)
+    THEN RAISE EXCEPTION 'Boundary-length keys must be accepted'; END IF;
+
+    -- Cleanup. A CASCADE delete also proves the FK really cascades.
+    DELETE FROM professional_management.professionals WHERE license_number = 'TEST-IDEMP-LEN';
+    IF EXISTS (SELECT 1 FROM professional_management.idempotency_key
+               WHERE professional_id = test_professional_id)
+    THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
 END;
 $$;
 
