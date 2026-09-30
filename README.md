@@ -16,6 +16,11 @@ and `professionals` tables;
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
 
+All domain tables live in the `professional_management` schema. Liquibase's own
+`databasechangelog` and `databasechangeloglock` tables stay in `public` because
+Liquibase creates them there by default; this is the only exception to the rule
+that nothing lives in `public`.
+
 Each `professionals` row represents a professional registered in Professional Management. The
 `status` field expresses the profile lifecycle: `ACTIVE` means the professional is active and
 available within this bounded context; `INACTIVE` means the record remains registered while the
@@ -32,6 +37,18 @@ intentionally has two changelog fragments: `01_ddl/changelog.yaml` and
 `01_ddl/changelog-post-dml.yaml`. The root changelog coordinates the DDL phases around `02_dml` to
 preserve the historical execution and rollback order: `001` → `001a` → `002` → `004` → `003` →
 `005` → `006`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
+
+## Schema migration
+
+Changeset `ddl-schemas-001` in `01_schemas` creates the `professional_management` schema.
+Changeset `ddl-alter-007` in `04_alter` moves `specialties`, `professionals`, and
+`specialty_seed_ownership` from `public` into `professional_management`, along with their
+owned sequences. Changeset `ddl-alter-008` in `04_alter` renames the professional CHECK
+constraints from `ck_*` to `chk_*`. Changeset `ddl-indexes-001` in `10_indexes` adds the
+missing index on `specialty_seed_ownership.specialty_id`.
+
+The actual application order is `ddl-schemas-001` → `001` → `001a` → `002` → `004` →
+`003` → `005` → `006` → `ddl-alter-007` → `ddl-alter-008` → `ddl-indexes-001`.
 
 Use `logicalFilePath` only for historical changesets whose physical SQL path changed during
 repository reorganization. Its value must preserve the exact historical logical path used by
