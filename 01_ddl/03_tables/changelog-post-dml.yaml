@@ -1,0 +1,5 @@
+databaseChangeLog:
+  - include:
+      file: 003-create-professionals.sql
+      relativeToChangelogFile: true
+      logicalFilePath: changes/003-create-professionals.sql
