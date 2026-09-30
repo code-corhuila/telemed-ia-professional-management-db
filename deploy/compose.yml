@@ -15,5 +15,26 @@ services:
       timeout: 5s
       retries: 12
 
+  liquibase:
+    image: liquibase/liquibase:4.31
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /workspace
+    volumes:
+      - ../changelog:/workspace/changelog:ro
+      - ../01_ddl:/workspace/01_ddl:ro
+      - ../02_dml:/workspace/02_dml:ro
+      - ../03_dcl:/workspace/03_dcl:ro
+      - ../04_tcl:/workspace/04_tcl:ro
+      - ../05_rollbacks:/workspace/05_rollbacks:ro
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      LIQUIBASE_COMMAND_USERNAME: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      LIQUIBASE_COMMAND_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      LIQUIBASE_COMMAND_CHANGELOG_FILE: changelog/changelog-master.yaml
+    profiles:
+      - migrations
+
 volumes:
   professional_management_data:
