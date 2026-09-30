@@ -1,9 +1,16 @@
 databaseChangeLog:
   - include:
-      file: 00_inserts/002-seed-specialties.sql
+      file: 00_inserts/changelog.yaml
       relativeToChangelogFile: true
-      logicalFilePath: changes/002-seed-specialties.sql
   - include:
-      file: 00_inserts/004-seed-additional-specialties.sql
+      file: 01_updates/changelog.yaml
       relativeToChangelogFile: true
-      logicalFilePath: changes/004-seed-additional-specialties.sql
+  - include:
+      file: 02_deletes/changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: 03_upserts/changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: 04_patches/changelog.yaml
+      relativeToChangelogFile: true
