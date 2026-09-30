@@ -25,6 +25,7 @@ services:
       - ./02_dml:/workspace/02_dml:ro
       - ./03_dcl:/workspace/03_dcl:ro
       - ./04_tcl:/workspace/04_tcl:ro
+      - ./05_rollbacks:/workspace/05_rollbacks:ro
     environment:
       LIQUIBASE_COMMAND_URL: jdbc:postgresql://postgres:5432/professional_management_test
       LIQUIBASE_COMMAND_USERNAME: ${TEST_DB_USER:?TEST_DB_USER must be set}
