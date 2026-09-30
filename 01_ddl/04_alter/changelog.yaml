@@ -1,4 +1,11 @@
 databaseChangeLog:
+  # Historical changesets 005 and 006 use SQL files with inline rollback
+  # (`--liquibase formatted sql`). Their checksums are frozen and their
+  # rollbacks cannot be moved to external files without breaking every
+  # environment that has already applied them.
+  # New changesets 007 and 008 use YAML changeSet entries with sqlFile and
+  # external rollbacks under 05_rollbacks/, as required by the database
+  # standard for new migrations. Both mechanisms coexist by design.
   - include:
       file: 005-cascade-deleted-specialty-ownership.sql
       relativeToChangelogFile: true
