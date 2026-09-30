@@ -1,0 +1,1 @@
+DROP TABLE professional_management.idempotency_key;

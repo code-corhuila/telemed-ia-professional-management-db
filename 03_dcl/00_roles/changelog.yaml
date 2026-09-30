@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-roles
+      author: telemed
+      comment: "Create non-login roles for Professional Management database access."
+      changes:
+        - sqlFile:
+            path: 001_create_roles.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/03_dcl/00_roles/001_create_roles.rollback.sql
+            relativeToChangelogFile: true
