@@ -6,7 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $id = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $network = "seed-rollback-$id"
 $container = "$network-postgres"
-$kinds = @('fresh', 'full', 'collision002', 'collision004', 'legacy', 'fk', 'admindelete', 'legacyfk')
+$kinds = @('fresh', 'full', 'collision002', 'collision004', 'legacy', 'fk', 'admindelete', 'legacyfk', 'transition')
 $databases = @($kinds | ForEach-Object { "seed_${_}_$id" })
 if ($databases.Count -ne $kinds.Count -or
     @($databases | Where-Object { $_ -notmatch "^seed_.+_$id$" }).Count -ne 0 -or
@@ -115,6 +115,7 @@ try {
 
     L $fresh @('rollback-count','--count','1')
     A $fresh "EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='professional_type')=false AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='status')=false AND to_regclass('public.professionals') IS NOT NULL" 'Rollback 006 must remove its columns but retain professionals.'
+    A $fresh "NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status')" 'Rollback 006 must remove its status index.'
     L $fresh @('rollback-count','--count','1')
     A $fresh "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Rollback 005 must restore the ownership FK behavior.'
     L $fresh @('rollback-count','--count','1')
@@ -130,7 +131,10 @@ try {
     L $fresh @('rollback-count','--count','1')
     A $fresh "to_regclass('public.specialties') IS NULL" '001 did not remove specialties.'
     L $fresh @('update'); Seven $fresh
+    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id='006-add-professional-type-and-status')=1" 'Reapplication after empty-table rollback must restore 006.'
     Own $fresh '002-seed-specialties' 4; Own $fresh '004-seed-additional-specialties' 3
+    L $fresh @('update')
+    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id='006-add-professional-type-and-status')=1" 'A second update after reapplication must leave 006 unchanged.'
     Schema $fresh
     Write-Host 'PASS fresh apply, ownership, staged rollbacks, reapply, and schema tests.'
 
@@ -195,10 +199,7 @@ try {
     Write-Host 'PASS professional referencing a 002 specialty is removed before seed rollback.'
 
     $adminDelete = $databases[6]; NewDb $adminDelete; L $adminDelete @('update-count', '--count', '6')
-    $backfillSpecialtyId = Scalar $adminDelete "SELECT id FROM specialties WHERE name='Medicina General'"
-    P $adminDelete "INSERT INTO professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000099,'TEST-MIGRATION-TRANSITION-006',$backfillSpecialtyId,0)"
     L $adminDelete @('update'); Schema $adminDelete
-    A $adminDelete "EXISTS (SELECT 1 FROM professionals WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE')" 'Migration 006 must preserve unknown professional_type and default status to ACTIVE.'
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='c')=1" 'Ownership FK must cascade only its metadata row.'
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_professionals_specialty' AND confdeltype='r')=1" 'Professional FK must remain restrictive.'
     $ownedId = Scalar $adminDelete "SELECT id FROM specialties WHERE name=$neurology"
@@ -207,8 +208,9 @@ try {
     A $adminDelete "NOT EXISTS (SELECT 1 FROM specialties WHERE id=$ownedId)" 'Administrator-deleted specialty remains.'
     $adminId = Scalar $adminDelete "INSERT INTO specialties(name,description) VALUES ($neurology,'administrator replacement') RETURNING id"
     if ($adminId -eq $ownedId) { throw 'Replacement specialty unexpectedly reused the deleted ID.' }
+
     L $adminDelete @('rollback-count','--count','1')
-    A $adminDelete "to_regclass('public.professionals') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status'))" 'Rollback 006 must remove its columns while retaining professionals.'
+    A $adminDelete "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status')" 'Empty-table rollback 006 must remove both columns and its status index.'
     L $adminDelete @('rollback-count','--count','1')
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Ownership FK rollback must restore NO ACTION.'
     L $adminDelete @('rollback-count','--count','1')
@@ -216,6 +218,21 @@ try {
     A $adminDelete "EXISTS (SELECT 1 FROM specialties WHERE id=$adminId AND name=$neurology AND description='administrator replacement')" 'Seed rollback deleted the administrator replacement.'
     A $adminDelete "(SELECT count(*) FROM specialties)=5" 'Seed rollback left unexpected specialty rows.'
     Write-Host 'PASS unused specialty deletion cascades metadata only; seed rollback preserves administrator replacement.'
+
+    $transition = $databases[8]; NewDb $transition; L $transition @('update-count','--count','6')
+    $transitionSpecialtyId = Scalar $transition "SELECT id FROM specialties WHERE name='Medicina General'"
+    P $transition "INSERT INTO professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000099,'TEST-MIGRATION-TRANSITION-006',$transitionSpecialtyId,0)"
+    L $transition @('update'); Schema $transition
+    A $transition "EXISTS (SELECT 1 FROM professionals WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE')" 'Migration 006 must preserve unknown professional_type and default status to ACTIVE.'
+
+    $rollbackFailure = & docker run --rm --network $network --workdir /workspace --mount "type=bind,source=$root,target=/workspace,readonly" `
+        liquibase/liquibase:4.31 "--url=jdbc:postgresql://${container}:5432/$transition" --username=test_user "--password=$password" `
+        --changelog-file=changelog/changelog-master.yaml rollback-count --count 1 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($rollbackFailure -join "`n") -notmatch 'professionals contains records; removing professional_type and status could lose lifecycle data') {
+        throw 'Rollback 006 must refuse to remove columns while any professional record exists.'
+    }
+    A $transition "EXISTS (SELECT 1 FROM professionals WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='professional_type') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='status') AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status')" 'Rejected rollback must preserve the professional, columns, and status index.'
+    Write-Host 'PASS migration 006 rollback is blocked without changing a professional or schema object.'
 } finally {
     $oldEap = $ErrorActionPreference
     try {
