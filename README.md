@@ -19,7 +19,9 @@ an external reference to Identity & Access and intentionally has no foreign key 
 An existing `professionals` row represents an active professional. The `status` field records
 whether a professional is `ACTIVE` or `INACTIVE`; this bounded context does not currently define
 soft deletion or normal administrator deletion of professionals. The catalog administration
-scope is `specialties`.
+scope is `specialties`. A professional may initially be created without `professional_type`; an
+administrator later classifies the profile as `GENERAL_PRACTITIONER` or `SPECIALIST`. The `status`
+lifecycle is independent of this type classification.
 
 Migrations use Liquibase and are defined in
 [`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
@@ -42,7 +44,11 @@ Migration `006` adds `professional_type` (`GENERAL_PRACTITIONER` or `SPECIALIST`
 because historical data does not establish each existing professional's type; the migration does
 not backfill or default it. `status` defaults to `ACTIVE` so inserts using the current Professional
 API contract, which omits both new fields, remain compatible. Rolling back changeset 006 drops both
-columns and removes any values written to them after deployment.
+columns and its status index only when no professional records exist. If any row exists, rollback
+fails before removing anything because `professional_type` or `status` may contain a later domain
+decision; the schema cannot distinguish `ACTIVE` supplied by the default from `ACTIVE` chosen
+subsequently. No historical professional type is backfilled. An empty `professionals` table is
+therefore required to roll back 006 safely.
 `03_dcl` is reserved for database access-control changes such as roles, grants, and privileges.
 `04_tcl` is reserved for transaction-control changes when required. Both families are currently
 empty because the Professional Management database does not require these changes.
