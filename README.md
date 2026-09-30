@@ -72,6 +72,40 @@ The deployment configuration is [`deploy/compose.yml`](deploy/compose.yml). Copy
 to `.env` and set the database name, user, password, and optional port before starting; `.env` is
 ignored by Git.
 
+## Repository structure alignment
+
+The repository follows the database standard structure. Every migration family
+under `01_ddl`, `02_dml`, `03_dcl`, and `04_tcl` carries a `changelog.yaml` in
+each subfolder; subfolders without objects yet carry an empty changelog so the
+execution order is fixed from the start.
+
+The historical DDL split is preserved: `01_ddl/changelog.yaml` runs the
+catalog table and ownership ledger before the seeds; `01_ddl/changelog-post-dml.yaml`
+runs the professionals table, its constraints, and its indexes after the seeds.
+This keeps reverse-order rollback safe with the restrictive foreign key from
+`professionals.specialty_id` to `specialties.id`.
+
+### Rollback layout
+
+Rollbacks for **new** changesets live as external files under `05_rollbacks/`,
+mirroring the migration families. Historical changesets `001` through `006`
+were applied before this layout existed and keep their inline `--rollback`
+blocks; editing them would change their Liquibase checksum and break every
+environment that has applied them (database standard, rule 12).
+
+See [`05_rollbacks/README.md`](05_rollbacks/README.md) for details.
+
+### Continuous integration
+
+`.github/workflows/db-ci.yml` runs on every pull request and push to `develop`,
+`qa`, and `main`. It exercises the full rebuild cycle against an empty database:
+
+1. `liquibase update` — builds the schema.
+2. `liquibase update` again — must apply zero changesets.
+3. `liquibase rollback-count 999` — reverts every changeset.
+4. Verifies no domain tables remain in `public`.
+5. `liquibase update` — reapplies the full set.
+
 ## Specialty lifecycle and delete policy
 
 An administrator may create and edit specialties. An administrator may delete a specialty only when no professionals are associated with it.
