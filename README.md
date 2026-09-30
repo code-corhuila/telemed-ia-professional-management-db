@@ -16,6 +16,11 @@ and `professionals` tables;
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
 
+All domain tables live in the `professional_management` schema. Liquibase's own
+`databasechangelog` and `databasechangeloglock` tables stay in `public` because
+Liquibase creates them there by default; this is the only exception to the rule
+that nothing lives in `public`.
+
 Each `professionals` row represents a professional registered in Professional Management. The
 `status` field expresses the profile lifecycle: `ACTIVE` means the professional is active and
 available within this bounded context; `INACTIVE` means the record remains registered while the
@@ -32,6 +37,19 @@ intentionally has two changelog fragments: `01_ddl/changelog.yaml` and
 `01_ddl/changelog-post-dml.yaml`. The root changelog coordinates the DDL phases around `02_dml` to
 preserve the historical execution and rollback order: `001` → `001a` → `002` → `004` → `003` →
 `005` → `006`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
+
+## Schema migration
+
+Changeset `ddl-schemas-001` in `01_schemas` creates the `professional_management` schema.
+Changeset `ddl-alter-007` in `04_alter` moves `specialties`, `professionals`, and
+`specialty_seed_ownership` from `public` into `professional_management`, along with their
+owned sequences. Changeset `ddl-alter-008` in `04_alter` renames the professional CHECK
+constraints from `ck_*` to `chk_*`. Changeset `ddl-indexes-001` in `10_indexes` adds the
+missing index on `specialty_seed_ownership.specialty_id`.
+
+The actual application order is `ddl-schemas-001` → `001` → `001a` → `002` → `004` →
+`003` → `005` → `006` → `ddl-alter-007` → `ddl-alter-008` → `ddl-indexes-001` →
+`001-create-roles` → `001-grants`.
 
 Use `logicalFilePath` only for historical changesets whose physical SQL path changed during
 repository reorganization. Its value must preserve the exact historical logical path used by
@@ -51,9 +69,23 @@ fails before removing anything because `professional_type` or `status` may conta
 decision; the schema cannot distinguish `ACTIVE` supplied by the default from `ACTIVE` chosen
 subsequently. No historical professional type is backfilled. An empty `professionals` table is
 therefore required to roll back 006 safely.
-`03_dcl` is reserved for database access-control changes such as roles, grants, and privileges.
-`04_tcl` is reserved for transaction-control changes when required. Both families are currently
-empty because the Professional Management database does not require these changes.
+
+## Access control
+
+The DCL changesets create two `NOLOGIN` roles and grant them the minimum
+privileges needed to use `professional_management`:
+
+- `professional_management_reader`: `USAGE` on the schema and `SELECT` on all tables.
+- `professional_management_writer`: `USAGE` on the schema, `SELECT`/`INSERT`/`UPDATE`/
+  `DELETE` on all tables, and `USAGE` on sequences. It is a member of the reader role.
+
+Infrastructure creates login users and assigns them to these roles using credentials
+from environment secrets. No password is stored in the repository. Default privileges
+ensure that future tables and sequences created in `professional_management` receive
+the same grants automatically.
+
+`04_tcl` is reserved for transaction-control changes when required and is currently
+empty because the Professional Management database has no such requirement.
 
 The initial specialty catalog remains in two seed changesets because the existing Liquibase
 history is retained without destructive changes. In a fresh database,

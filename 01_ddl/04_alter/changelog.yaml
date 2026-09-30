@@ -1,4 +1,11 @@
 databaseChangeLog:
+  # Historical changesets 005 and 006 use SQL files with inline rollback
+  # (`--liquibase formatted sql`). Their checksums are frozen and their
+  # rollbacks cannot be moved to external files without breaking every
+  # environment that has already applied them.
+  # New changesets 007 and 008 use YAML changeSet entries with sqlFile and
+  # external rollbacks under 05_rollbacks/, as required by the database
+  # standard for new migrations. Both mechanisms coexist by design.
   - include:
       file: 005-cascade-deleted-specialty-ownership.sql
       relativeToChangelogFile: true
@@ -6,3 +13,27 @@ databaseChangeLog:
   - include:
       file: 006-add-professional-type-and-status.sql
       relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-007
+      author: telemed
+      comment: "Move Professional Management domain tables into their dedicated schema."
+      changes:
+        - sqlFile:
+            path: 007_move_domain_tables_to_schema.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/007_move_domain_tables_to_schema.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-008
+      author: telemed
+      comment: "Align professional CHECK constraint names with the repository naming convention."
+      changes:
+        - sqlFile:
+            path: 008_rename_check_constraints.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/008_rename_check_constraints.rollback.sql
+            relativeToChangelogFile: true

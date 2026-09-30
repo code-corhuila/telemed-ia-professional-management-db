@@ -203,9 +203,11 @@ try {
     }
 
     Invoke-Liquibase @('rollback-count', "$expectedChangesets")
-    Assert-Sql "SELECT to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL" `
+    Assert-Sql "SELECT to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL AND to_regclass('professional_management.specialties') IS NULL AND to_regclass('professional_management.professionals') IS NULL AND to_regclass('professional_management.specialty_seed_ownership') IS NULL" `
         'Domain tables remain after complete rollback.'
-    Assert-Sql "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')) = 0" `
+    Assert-Sql "SELECT NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='professional_management')" `
+        'Professional Management schema remains after complete rollback.'
+    Assert-Sql "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('public','professional_management') AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')) = 0" `
         'Unexpected domain tables remain after complete rollback.'
     Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 0' 'Liquibase changeset history remains after rollback.'
 
