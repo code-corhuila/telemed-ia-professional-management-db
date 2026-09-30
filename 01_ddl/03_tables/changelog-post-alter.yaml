@@ -1,0 +1,15 @@
+databaseChangeLog:
+  # Post-alter DDL: creates tables that depend on the domain schema being
+  # populated (professional_management.* tables live there after ddl-alter-007).
+  - changeSet:
+      id: ddl-tables-004
+      author: telemed
+      comment: "idempotency_key: stores the Idempotency-Key header to make professional creation idempotent."
+      changes:
+        - sqlFile:
+            path: 004_create_idempotency_key.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/004_create_idempotency_key.rollback.sql
+            relativeToChangelogFile: true
