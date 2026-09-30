@@ -16,12 +16,14 @@ and `professionals` tables;
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
 
-An existing `professionals` row represents an active professional. The `status` field records
-whether a professional is `ACTIVE` or `INACTIVE`; this bounded context does not currently define
-soft deletion or normal administrator deletion of professionals. The catalog administration
-scope is `specialties`. A professional may initially be created without `professional_type`; an
-administrator later classifies the profile as `GENERAL_PRACTITIONER` or `SPECIALIST`. The `status`
-lifecycle is independent of this type classification.
+Each `professionals` row represents a professional registered in Professional Management. The
+`status` field expresses the profile lifecycle: `ACTIVE` means the professional is active and
+available within this bounded context; `INACTIVE` means the record remains registered while the
+professional is inactive. `status` is independent of `professional_type`. A professional may
+initially be created with `professional_type` set to `NULL`; an administrator later classifies the
+profile as `GENERAL_PRACTITIONER` or `SPECIALIST`. This bounded context does not currently define
+soft deletion or normal administrator deletion of professionals. The catalog administration scope
+is `specialties`.
 
 Migrations use Liquibase and are defined in
 [`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
