@@ -17,6 +17,21 @@ source of truth and this document reflects their current state.
 - Constraint prefixes: `pk_` (primary key), `fk_` (foreign key), `uq_`
   (unique), `chk_` (check). Every constraint has an explicit name so a
   later migration can reference it.
+- Constraint prefix `nn_` for NOT NULL is declared in some historical
+  changesets (001a, 003) but PostgreSQL does not materialize a column-
+  level `CONSTRAINT nn_... NOT NULL` as an entry in `pg_constraint`:
+  the name is discarded and the constraint lives in
+  `pg_attribute.attnotnull`. New migrations should not use `nn_` and
+  should rely on the `NOT NULL` keyword alone, or declare the constraint
+  via `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL` if a name is
+  required for later reference.
+
+  Changesets 001a and 003 still contain `nn_` in their source; they
+  are frozen by rule 12 and cannot be edited. The prefix is harmless
+  (PostgreSQL discards the name), so there is no urgency to clean it
+  up. A future migration may drop and re-add those NOT NULL
+  constraints without a name if full consistency with this convention
+  is wanted.
 - Index prefixes: `idx_<table>_<columns>`.
 - Text columns are `text` with an explicit `CHECK (char_length(...) <= n)`
   where the business fixes a limit; not `VARCHAR(n)`.
@@ -176,7 +191,7 @@ instead of creating a new one.
 |---|---|---|
 | `pk_idempotency_key` | Primary key | `(key)` |
 | `fk_idempotency_key_professional` | Foreign key | `professional_id` → `professional.id` `ON DELETE CASCADE` |
-| `chk_idempotency_key_length` | Check | `char_length(key) BETWEEN 8 AND 128` |
+| `chk_idempotency_key_length` | Check | `length(key) BETWEEN 8 AND 128` |
 
 **Indexes:**
 
@@ -261,3 +276,55 @@ The `professional.identity_user_id` column holds a reference to data owned
 by Identity & Access. It is stored as a plain `bigint` with a UNIQUE
 constraint and no foreign key, per numeral 7.4 of the standard (integrity
 between domains is enforced by contract, not by the database engine).
+
+---
+
+## Notes on review findings
+
+These notes answer the automated review findings left on the data
+dictionary when it was introduced (PR #17).
+
+- **Idempotency enforcement.** The `key` column of `idempotency_key`
+  is a PRIMARY KEY (`pk_idempotency_key`), which is the mechanism that
+  enforces single-row-per-key at the database level. The application
+  logic (lookup-before-insert, return cached response on collision)
+  lives in the `-api` repository, not here.
+- **Changeset ID scheme.** The two ID schemes visible in this
+  dictionary (`NNN-description` for historical changesets 001-006 and
+  `ddl-<family>-NNN` for changesets 007 onwards) are intentional.
+  Historical checksums are frozen (rule 12) and cannot be renamed
+  without breaking every environment that applied them.
+- **Cascade semantics.** Two foreign keys use `ON DELETE CASCADE`:
+  - `fk_specialty_seed_ownership_specialty` removes the ownership
+    metadata row when an unreferenced specialty is deleted. It
+    does not delete professionals or specialties. Deleting a
+    referenced specialty is blocked by `fk_professional_specialty`
+    (`ON DELETE RESTRICT`). The metadata row only records which
+    seed changeset inserted the specialty, so losing it on cascade
+    does not lose business data. The rollback of
+    `005-cascade-deleted-specialty-ownership` restores the FK to
+    NO ACTION.
+  - `fk_idempotency_key_professional` removes the stored
+    idempotency key when the referenced professional is deleted.
+    In normal operation professionals are not deleted: the
+    Professional Management aggregate has no delete operation,
+    and no soft-delete column is defined. If a professional were
+    deleted out of band, the key would be removed with it and a
+    later request reusing the same key would create a new record
+    instead of returning the original. There is no audit trail
+    and no soft-delete for either cascade; that is a deliberate
+    choice for this domain, not an oversight. If the business
+    later requires retention, the recovery path is a forward
+    migration that adds a retention table or a soft-delete
+    column, never a schema edit of a frozen changeset.
+- **Completeness check.** The CI workflow
+  (`.github/workflows/db-ci.yml`) catches drift between the
+  migrations and a fresh database: every merge to `develop`, `qa`,
+  or `main` runs `liquibase update` from an empty database, verifies
+  idempotency, runs full rollback, and reapplies. It does **not**
+  compare the text of this dictionary or the README against the
+  live schema; documentation is synchronized manually. A
+  doc-vs-schema check is not implemented, and its absence is
+  exactly why PR #17 and PR #18 drifted undetected and why PR #19
+  exists to correct that drift. Adding such a check is tracked as
+  future work.
