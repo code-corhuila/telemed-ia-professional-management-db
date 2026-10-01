@@ -89,4 +89,62 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/04_alter/014_validate_professional_specialty_fk.rollback.sql
             relativeToChangelogFile: true
+  # ddl-alter-015 through ddl-alter-018 move the two remaining inline foreign
+  # keys out of their frozen 03_tables declarations. 015 and 016 relocate
+  # fk_specialty_seed_ownership_specialty (declared inline in changeset 001a) and
+  # 017 and 018 relocate fk_idempotency_key_professional (declared inline in
+  # ddl-tables-004), both ON DELETE CASCADE, each split into an ADD CONSTRAINT
+  # NOT VALID plus a separate VALIDATE CONSTRAINT so no ACCESS EXCLUSIVE lock is
+  # ever taken. 015 through 018 follow the same reasoning as 013 and 014: they must
+  # run after ddl-alter-012 has renamed the tables, because both re-added
+  # constraints reference professional_management.specialty and
+  # professional_management.professional under their singular names.
+  - changeSet:
+      id: ddl-alter-015
+      author: telemed
+      comment: "Re-declare fk_specialty_seed_ownership_specialty from 04_alter to satisfy Anexo A rule 2."
+      changes:
+        - sqlFile:
+            path: ../04_alter/015_recreate_specialty_seed_ownership_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/015_recreate_specialty_seed_ownership_fk.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-016
+      author: telemed
+      comment: "Validate fk_specialty_seed_ownership_specialty added NOT VALID by ddl-alter-015."
+      changes:
+        - sqlFile:
+            path: ../04_alter/016_validate_specialty_seed_ownership_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/016_validate_specialty_seed_ownership_fk.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-017
+      author: telemed
+      comment: "Re-declare fk_idempotency_key_professional from 04_alter to satisfy Anexo A rule 2."
+      changes:
+        - sqlFile:
+            path: ../04_alter/017_recreate_idempotency_key_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/017_recreate_idempotency_key_fk.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-018
+      author: telemed
+      comment: "Validate fk_idempotency_key_professional added NOT VALID by ddl-alter-017."
+      changes:
+        - sqlFile:
+            path: ../04_alter/018_validate_idempotency_key_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/018_validate_idempotency_key_fk.rollback.sql
+            relativeToChangelogFile: true
 
