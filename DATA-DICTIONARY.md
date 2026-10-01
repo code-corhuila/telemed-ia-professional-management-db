@@ -25,6 +25,13 @@ source of truth and this document reflects their current state.
   should rely on the `NOT NULL` keyword alone, or declare the constraint
   via `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL` if a name is
   required for later reference.
+
+  Changesets 001a and 003 still contain `nn_` in their source; they
+  are frozen by rule 12 and cannot be edited. The prefix is harmless
+  (PostgreSQL discards the name), so there is no urgency to clean it
+  up. A future migration may drop and re-add those NOT NULL
+  constraints without a name if full consistency with this convention
+  is wanted.
 - Index prefixes: `idx_<table>_<columns>`.
 - Text columns are `text` with an explicit `CHECK (char_length(...) <= n)`
   where the business fixes a limit; not `VARCHAR(n)`.
@@ -287,14 +294,37 @@ dictionary when it was introduced (PR #17).
   `ddl-<family>-NNN` for changesets 007 onwards) are intentional.
   Historical checksums are frozen (rule 12) and cannot be renamed
   without breaking every environment that applied them.
-- **Cascade semantics.** The `ON DELETE CASCADE` on
-  `fk_specialty_seed_ownership_specialty` removes only the ownership
-  metadata row when an unreferenced specialty is deleted. It does not
-  delete professionals or specialties. The rollback of
-  `005-cascade-deleted-specialty-ownership` restores the FK to
-  NO ACTION.
+- **Cascade semantics.** Two foreign keys use `ON DELETE CASCADE`:
+  - `fk_specialty_seed_ownership_specialty` removes the ownership
+    metadata row when an unreferenced specialty is deleted. It
+    does not delete professionals or specialties. Deleting a
+    referenced specialty is blocked by `fk_professional_specialty`
+    (`ON DELETE RESTRICT`). The metadata row only records which
+    seed changeset inserted the specialty, so losing it on cascade
+    does not lose business data. The rollback of
+    `005-cascade-deleted-specialty-ownership` restores the FK to
+    NO ACTION.
+  - `fk_idempotency_key_professional` removes the stored
+    idempotency key when the referenced professional is deleted.
+    In normal operation professionals are not deleted: the
+    Professional Management aggregate has no delete operation,
+    and no soft-delete column is defined. If a professional were
+    deleted out of band, the key would be removed with it and a
+    later request reusing the same key would create a new record
+    instead of returning the original. There is no audit trail
+    and no soft-delete for either cascade; that is a deliberate
+    choice for this domain, not an oversight. If the business
+    later requires retention, the recovery path is a forward
+    migration that adds a retention table or a soft-delete
+    column, never a schema edit of a frozen changeset.
 - **Completeness check.** The CI workflow
-  (`.github/workflows/db-ci.yml`) is the mechanism that catches drift
-  when new changesets are added. Every merge to `develop`, `qa`, or
-  `main` runs `liquibase update` from an empty database, verifies
-  idempotency, runs full rollback, and reapplies.
+  (`.github/workflows/db-ci.yml`) catches drift between the
+  migrations and a fresh database: every merge to `develop`, `qa`,
+  or `main` runs `liquibase update` from an empty database, verifies
+  idempotency, runs full rollback, and reapplies. It does **not**
+  compare the text of this dictionary or the README against the
+  live schema; documentation is synchronized manually. A
+  doc-vs-schema check is not implemented, and its absence is
+  exactly why PR #17 and PR #18 drifted undetected and why PR #19
+  exists to correct that drift. Adding such a check is tracked as
+  future work.
