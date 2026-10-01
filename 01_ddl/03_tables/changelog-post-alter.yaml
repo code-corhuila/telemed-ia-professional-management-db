@@ -62,7 +62,7 @@ databaseChangeLog:
   - changeSet:
       id: ddl-alter-013
       author: telemed
-      comment: "Re-declare fk_professionals_specialty from 04_alter to satisfy Anexo A rule 2."
+      comment: "Re-declare fk_professional_specialty from 04_alter to satisfy Anexo A rule 2."
       changes:
         - sqlFile:
             path: ../04_alter/013_recreate_professional_specialty_fk.sql
@@ -70,5 +70,23 @@ databaseChangeLog:
       rollback:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/04_alter/013_recreate_professional_specialty_fk.rollback.sql
+            relativeToChangelogFile: true
+  # ddl-alter-014 is the second half of the ddl-alter-013 FK migration. It must
+  # stay immediately after ddl-alter-013, in this same fragment, because it
+  # validates a constraint on professional_management.professional under its new
+  # singular name. Moving it to 04_alter/changelog.yaml would run it before
+  # ddl-alter-012 renames the table, and VALIDATE CONSTRAINT would fail with
+  # 'constraint "fk_professional_specialty" of relation "professional" does not exist'.
+  - changeSet:
+      id: ddl-alter-014
+      author: telemed
+      comment: "Validate fk_professional_specialty added NOT VALID by ddl-alter-013."
+      changes:
+        - sqlFile:
+            path: ../04_alter/014_validate_professional_specialty_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/014_validate_professional_specialty_fk.rollback.sql
             relativeToChangelogFile: true
 
