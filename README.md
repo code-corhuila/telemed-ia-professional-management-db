@@ -318,6 +318,22 @@ the schema objects is documented below.
 **Status:** all requirements are implemented in the 22 changesets of this
 repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONARY.md).
 
+## Historical commit message debt
+
+Norm 8.2 of the course admits only the types `feat`, `fix`, `docs`,
+`style`, `refactor`, `test`, `chore`, and `perf` in commit messages.
+The early history of this repository contains commits with the types
+`ci(...)` (workflow changes) and `merge(...)` (an integration conflict
+resolved during PR #5). They are recorded here as a known debt.
+
+They were not corrected because rewriting published history is
+prohibited by norm 9.6: a `git push --force` on a shared branch destroys
+the promotion traces that the standard requires. From this PR onward,
+every new commit uses one of the eight admitted types. The workflow
+changes that would have been `ci(...)` are now committed as
+`chore(...)`, and integration conflicts are resolved without a separate
+merge commit.
+
 ## Branching
 
 Three permanent branches. **None of them accepts a direct commit** — you enter through a child
