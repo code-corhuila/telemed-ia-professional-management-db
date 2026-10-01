@@ -72,10 +72,21 @@ function A([string]$Db, [string]$Condition, [string]$Message) {
     P $Db "DO `$`$ BEGIN IF NOT ($Condition) THEN RAISE EXCEPTION '$message'; END IF; END; `$`$;"
 }
 function DomainSchema([string]$Db) {
-    if ((Scalar $Db "SELECT CASE WHEN to_regclass('professional_management.specialties') IS NOT NULL THEN 1 ELSE 0 END") -eq 1) {
+    if ((Scalar $Db "SELECT CASE WHEN to_regclass('professional_management.specialty') IS NOT NULL THEN 1 ELSE 0 END") -eq 1) {
         return 'professional_management'
     }
     return 'public'
+}
+# The specialty table is singular in professional_management after ddl-alter-012,
+# but keeps its historical plural name once that changeset has been rolled back
+# and the tables live in public. Same for the professional table.
+function SpecialtyTable([string]$Db) {
+    if ((DomainSchema $Db) -eq 'professional_management') { return 'specialty' }
+    return 'specialties'
+}
+function ProfessionalTable([string]$Db) {
+    if ((DomainSchema $Db) -eq 'professional_management') { return 'professional' }
+    return 'professionals'
 }
 function Own([string]$Db, [string]$Change, [int]$Count) {
     $schema = DomainSchema $Db
@@ -83,7 +94,7 @@ function Own([string]$Db, [string]$Change, [int]$Count) {
 }
 function FixtureRow([string]$Db, [long]$SpecialtyId) {
     $schema = DomainSchema $Db
-    A $Db "EXISTS (SELECT 1 FROM $schema.specialties WHERE id=$SpecialtyId AND description='$fixture')" "Fixture row changed: $SpecialtyId"
+    A $Db "EXISTS (SELECT 1 FROM $schema.$(SpecialtyTable $Db) WHERE id=$SpecialtyId AND description='$fixture')" "Fixture row changed: $SpecialtyId"
 }
 function Scalar([string]$Db, [string]$Sql) {
     # Same PowerShell 5.1 caveat as D: capture stdout of a native command without
@@ -111,20 +122,20 @@ function NewDb([string]$Db) {
 }
 function Seven([string]$Db) {
     $schema = DomainSchema $Db
-    A $Db "(SELECT count(*) FROM $schema.specialties)=7" 'Expected seven specialties.'
+    A $Db "(SELECT count(*) FROM $schema.$(SpecialtyTable $Db))=7" 'Expected seven specialties.'
 }
 function Collision([string]$Db, [string]$Name, [string]$NameSql, [string]$Change, [int]$ExpectedOwned, [int]$ExpectedRows, [int]$PrefixCount) {
     NewDb $Db
     L $Db @('update-count', '--count', "$PrefixCount")
     $schema = DomainSchema $Db
-    $specialtyId = Scalar $Db "INSERT INTO $schema.specialties(name,description) VALUES ($NameSql,'$fixture') RETURNING id"
+    $specialtyId = Scalar $Db "INSERT INTO $schema.$(SpecialtyTable $Db)(name,description) VALUES ($NameSql,'$fixture') RETURNING id"
     L $Db @('update-count', '--count', '1')
     FixtureRow $Db $specialtyId
     A $Db "NOT EXISTS (SELECT 1 FROM $schema.specialty_seed_ownership WHERE changeset_id='$Change' AND specialty_id=$specialtyId)" "Pre-existing $Name was claimed."
     Own $Db $Change $ExpectedOwned
     L $Db @('rollback-count', '--count', '1')
     FixtureRow $Db $specialtyId
-    A $Db "(SELECT count(*) FROM $schema.specialties)=$ExpectedRows" "$Name rollback left unexpected rows."
+    A $Db "(SELECT count(*) FROM $schema.$(SpecialtyTable $Db))=$ExpectedRows" "$Name rollback left unexpected rows."
     Own $Db $Change 0
     Write-Host "PASS $Change collision preserves pre-existing row and removes owned rows."
 }
@@ -153,20 +164,20 @@ try {
     if (-not $ready) { throw 'Disposable PostgreSQL did not become ready.' }
 
     $fresh = $databases[0]; NewDb $fresh; L $fresh @('update'); L $fresh @('validate')
-    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-alter-010','ddl-alter-011','ddl-tables-004','ddl-alter-009','ddl-indexes-001','001-create-roles','001-grants','dcl-grants-002'))=18" 'Expected eighteen changesets.'
+    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-alter-010','ddl-alter-011','ddl-tables-004','ddl-alter-009','ddl-indexes-001','ddl-alter-012','ddl-alter-013','ddl-alter-014','ddl-indexes-002','001-create-roles','001-grants','dcl-grants-002'))=22" 'Expected twenty-two changesets.'
     Seven $fresh; Own $fresh '002-seed-specialties' 4; Own $fresh '004-seed-additional-specialties' 3
     Schema $fresh
     L $fresh @('update')
-    A $fresh '(SELECT count(*) FROM databasechangelog)=18' 'Second update applied additional changesets.'
+    A $fresh '(SELECT count(*) FROM databasechangelog)=22' 'Second update applied additional changesets.'
     Seven $fresh; Own $fresh '002-seed-specialties' 4; Own $fresh '004-seed-additional-specialties' 3
     Write-Host 'PASS second update is idempotent.'
 
     L $fresh @('rollback-count','--count','1')
     A $fresh "to_regclass('professional_management.idempotency_key') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM databasechangelog WHERE id='dcl-grants-002')" 'Explicit grant rollback must remove its changeset history and keep the table.'
-    A $fresh "has_table_privilege('professional_management_writer','professional_management.professionals','INSERT') AND has_table_privilege('professional_management_reader','professional_management.professionals','SELECT')" 'Explicit grant rollback must not disturb the grants applied by 001-grants.'
+    A $fresh "has_table_privilege('professional_management_writer','professional_management.professional','INSERT') AND has_table_privilege('professional_management_reader','professional_management.professional','SELECT')" 'Explicit grant rollback must not disturb the grants applied by 001-grants.'
 
     L $fresh @('rollback-count','--count','1')
-    A $fresh "NOT has_schema_privilege('professional_management_reader','professional_management','USAGE') AND NOT has_table_privilege('professional_management_writer','professional_management.professionals','INSERT')" 'Grant rollback must revoke current schema and table privileges.'
+    A $fresh "NOT has_schema_privilege('professional_management_reader','professional_management','USAGE') AND NOT has_table_privilege('professional_management_writer','professional_management.professional','INSERT')" 'Grant rollback must revoke current schema and table privileges.'
     A $fresh "NOT has_table_privilege('professional_management_reader','professional_management.idempotency_key','SELECT')" 'Grant rollback must also remove the idempotency_key grants granted by ON ALL TABLES.'
     P $fresh 'CREATE TABLE professional_management.grant_rollback_probe (id integer)'
     A $fresh "NOT has_table_privilege('professional_management_reader','professional_management.grant_rollback_probe','SELECT') AND NOT has_table_privilege('professional_management_writer','professional_management.grant_rollback_probe','INSERT')" 'Grant rollback must remove default privileges for future tables.'
@@ -174,7 +185,18 @@ try {
     L $fresh @('rollback-count','--count','1')
     A $fresh "NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('professional_management_reader','professional_management_writer'))" 'Role rollback must remove both DCL roles.'
     L $fresh @('rollback-count','--count','1')
-    A $fresh "NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='professional_management' AND tablename='specialty_seed_ownership' AND indexname='idx_specialty_seed_ownership_specialty_id')" 'Rollback index changeset must remove its ownership index.'
+    A $fresh "(SELECT count(*) FROM pg_indexes WHERE schemaname='professional_management' AND indexname IN ('idx_professionals_specialty_id','idx_professionals_status','idx_idempotency_key_professional_id'))=3 AND (SELECT count(*) FROM pg_indexes WHERE schemaname='professional_management' AND indexname IN ('idx_professional_specialty_id','idx_professional_status'))=0" 'Rollback ddl-indexes-002 must re-create the historical index names.'
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='professional_management' AND tablename='specialty_seed_ownership' AND indexname='idx_specialty_seed_ownership_specialty_id')" 'Rollback of ddl-indexes-001 must remove its ownership index.'
+    L $fresh @('rollback-count','--count','1')
+    # ddl-alter-014 is the no-op rollback: PostgreSQL has no UNVALIDATE
+    # CONSTRAINT, so the validated fk_professional_specialty must survive
+    # unchanged until ddl-alter-013 drops it in the next rollback.
+    A $fresh "(SELECT count(*) FROM pg_constraint WHERE conname='fk_professional_specialty' AND conrelid='professional_management.professional'::regclass AND confdeltype='r' AND convalidated)=1" 'Rollback of ddl-alter-014 must keep the validated fk_professional_specialty in place.'
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "(SELECT count(*) FROM pg_constraint WHERE conname='fk_professionals_specialty' AND conrelid='professional_management.professional'::regclass AND confdeltype='r')=1 AND (SELECT count(*) FROM pg_constraint WHERE conname='fk_professional_specialty')=0" 'Rollback ddl-alter-013 must restore the historical fk_professionals_specialty name on the singular table.'
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "to_regclass('professional_management.specialties') IS NOT NULL AND to_regclass('professional_management.specialty') IS NULL AND to_regclass('professional_management.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL" 'Rollback ddl-alter-012 must restore the historical plural table names.'
     L $fresh @('rollback-count','--count','1')
     A $fresh "to_regclass('professional_management.idempotency_key') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='idempotency_key' AND column_name='request_hash')" 'Rollback 009 must drop only the request_hash column and keep the idempotency_key table.'
     L $fresh @('rollback-count','--count','1')
@@ -186,7 +208,7 @@ try {
     L $fresh @('rollback-count','--count','1')
     A $fresh "(SELECT count(*) FROM pg_constraint WHERE conrelid='professional_management.professionals'::regclass AND conname IN ('ck_professionals_years_experience_nonnegative','ck_professionals_professional_type','ck_professionals_status'))=3" 'Rollback 008 must restore the historical CHECK names.'
     L $fresh @('rollback-count','--count','1')
-    A $fresh "to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professionals') IS NULL AND to_regclass('public.specialties') IS NOT NULL AND to_regclass('public.specialty_seed_ownership') IS NOT NULL" 'Rollback 007 must return domain tables to public.'
+    A $fresh "to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL AND to_regclass('public.specialties') IS NOT NULL AND to_regclass('public.specialty_seed_ownership') IS NOT NULL" 'Rollback 007 must return domain tables to public.'
     L $fresh @('rollback-count','--count','1')
     A $fresh "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND to_regclass('public.professionals') IS NOT NULL" 'Rollback 006 must remove its columns but retain professionals.'
     A $fresh "NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status')" 'Rollback 006 must remove its status index.'
@@ -228,14 +250,14 @@ try {
     Schema $fresh
     Write-Host 'PASS fresh apply, ownership, staged rollbacks, reapply, and schema tests.'
 
-    $full = $databases[1]; NewDb $full; L $full @('update'); L $full @('rollback-count','--count','18')
-    A $full "to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL AND to_regclass('professional_management.specialties') IS NULL AND to_regclass('professional_management.professionals') IS NULL AND to_regclass('professional_management.specialty_seed_ownership') IS NULL" 'Full rollback left domain tables.'
+    $full = $databases[1]; NewDb $full; L $full @('update'); L $full @('rollback-count','--count','22')
+    A $full "to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL AND to_regclass('professional_management.specialty') IS NULL AND to_regclass('professional_management.professional') IS NULL AND to_regclass('professional_management.specialty_seed_ownership') IS NULL" 'Full rollback left domain tables.'
     A $full "NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='professional_management')" 'Full rollback left the domain schema.'
-    A $full "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-alter-010','ddl-alter-011','ddl-tables-004','ddl-alter-009','ddl-indexes-001','001-create-roles','001-grants','dcl-grants-002'))=0" 'Full rollback left changeset history.'
+    A $full "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-alter-010','ddl-alter-011','ddl-tables-004','ddl-alter-009','ddl-indexes-001','ddl-alter-012','ddl-alter-013','ddl-alter-014','ddl-indexes-002','001-create-roles','001-grants','dcl-grants-002'))=0" 'Full rollback left changeset history.'
     L $full @('update'); Seven $full
     Own $full '002-seed-specialties' 4; Own $full '004-seed-additional-specialties' 3
     Schema $full
-    Write-Host 'PASS rollback-count=18, table/schema/history removal, reapply, and schema tests.'
+    Write-Host 'PASS rollback-count=22, table/schema/history removal, reapply, and schema tests.'
 
     Collision $databases[2] 'Medicina General' "'Medicina General'" '002-seed-specialties' 3 1 3
     Collision $databases[3] 'Neurología' $neurology '004-seed-additional-specialties' 2 5 4
@@ -248,26 +270,20 @@ try {
     $legacyMode = $false; L $legacy @('validate'); L $legacy @('update')
     A $legacy "to_regclass('professional_management.specialty_seed_ownership') IS NOT NULL AND (SELECT count(*) FROM professional_management.specialty_seed_ownership)=0" 'Legacy rows were backfilled.'
     Seven $legacy
+    # The legacy database merges the 4 fixture changesets with the 22 of the current
+    # repository, for 22 changesets in total. The rollback order follows the recorded
+    # execution order, which is not the seed order once `validate` has run: 001a and
+    # ddl-schemas-001 are reverted before 003, 004 and 002. Twenty reverts therefore
+    # leave 001 and ddl-schemas-001 applied and have already reverted 003 and 004, so
+    # the professionals table is gone while the seven-row catalog is preserved. The
+    # rollback below then reverts 002, whose current ownership-scoped definition
+    # removes only the rows it claimed, which in a legacy database is none, so all
+    # seven rows survive with the history row gone. That contrast is the point of
+    # this scenario.
+    1..20 | ForEach-Object { L $legacy @('rollback-count', '--count', '1') }
+    A $legacy "to_regclass('public.professionals') IS NULL AND (SELECT count(*) FROM public.specialties)=7" 'Legacy 003 and 004 rollbacks changed the catalog or retained professionals.'
     L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    L $legacy @('rollback-count', '--count', '1')
-    A $legacy "(SELECT count(*) FROM databasechangelog WHERE id='004-seed-additional-specialties')=0 AND (SELECT count(*) FROM public.specialties)=7" 'Legacy 004 rollback must remove history but preserve unowned rows.'
-    L $legacy @('rollback-count', '--count', '1')
-    A $legacy "to_regclass('public.professionals') IS NULL AND (SELECT count(*) FROM public.specialties)=7" 'Legacy 003 rollback changed the catalog or retained professionals.'
-    L $legacy @('rollback-count', '--count', '1')
-    A $legacy "(SELECT count(*) FROM databasechangelog WHERE id='002-seed-specialties')=0 AND (SELECT count(*) FROM public.specialties)=7" 'Legacy 002 rollback must remove history but preserve unowned rows.'
+    A $legacy "(SELECT count(*) FROM databasechangelog WHERE id='002-seed-specialties')=0 AND (SELECT count(*) FROM public.specialties)=7" 'Legacy 002 rollback must remove its history but preserve the unowned rows.'
     Write-Host 'PASS legacy rollback removes migration history but preserves unowned seed rows.'
 
     $legacyFk = $databases[7]; NewDb $legacyFk
@@ -290,10 +306,16 @@ try {
     Write-Host 'PASS historical FK blocks rollback until the professional reference is removed.'
 
     $fk = $databases[5]; NewDb $fk; L $fk @('update')
-    $generalId = Scalar $fk "SELECT id FROM professional_management.specialties WHERE name='Medicina General'"
-    P $fk "INSERT INTO professional_management.professionals(identity_user_id,license_number,specialty_id,years_experience,professional_type,status) VALUES (900000001,'TEST-ROLLBACK-002-001',$generalId,0,'GENERAL_PRACTITIONER','ACTIVE')"
-    L $fk @('rollback-count', '--count', '10')
-    A $fk "to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professionals') IS NULL AND EXISTS (SELECT 1 FROM public.professionals WHERE license_number='TEST-ROLLBACK-002-001')" 'Rollback 007 must return tables to public and preserve the professional.'
+    $generalId = Scalar $fk "SELECT id FROM professional_management.specialty WHERE name='Medicina General'"
+    P $fk "INSERT INTO professional_management.professional(identity_user_id,license_number,specialty_id,years_experience,professional_type,status) VALUES (900000001,'TEST-ROLLBACK-002-001',$generalId,0,'GENERAL_PRACTITIONER','ACTIVE')"
+    # Rolls back the 14 most recent changesets, stopping just before 006. That set
+    # includes ddl-alter-007, which moves the domain tables from professional_management
+    # back to public, and ddl-alter-012, which renamed them to singular, already
+    # reverted by then. The tables are back under their historical plural names in
+    # public, with the professional row still present. 006 stays applied on purpose:
+    # the single rollback below must be refused while that row exists.
+    L $fk @('rollback-count', '--count', '14')
+    A $fk "to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL AND EXISTS (SELECT 1 FROM public.professionals WHERE license_number='TEST-ROLLBACK-002-001')" 'Rollback of ddl-alter-012 and ddl-alter-007 must restore the plural table names in public and preserve the professional.'
     $rollbackPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
@@ -322,16 +344,25 @@ try {
     $adminDelete = $databases[6]; NewDb $adminDelete; L $adminDelete @('update-count', '--count', '6')
     L $adminDelete @('update'); Schema $adminDelete
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='c')=1" 'Ownership FK must cascade only its metadata row.'
-    A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_professionals_specialty' AND confdeltype='r')=1" 'Professional FK must remain restrictive.'
-    $ownedId = Scalar $adminDelete "SELECT id FROM professional_management.specialties WHERE name=$neurology"
-    P $adminDelete "DELETE FROM professional_management.specialties WHERE id=$ownedId"
+    A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_professional_specialty' AND confdeltype='r')=1" 'Professional FK must remain restrictive.'
+    $ownedId = Scalar $adminDelete "SELECT id FROM professional_management.specialty WHERE name=$neurology"
+    P $adminDelete "DELETE FROM professional_management.specialty WHERE id=$ownedId"
     Own $adminDelete '004-seed-additional-specialties' 2
-    A $adminDelete "NOT EXISTS (SELECT 1 FROM professional_management.specialties WHERE id=$ownedId)" 'Administrator-deleted specialty remains.'
-    $adminId = Scalar $adminDelete "INSERT INTO professional_management.specialties(name,description) VALUES ($neurology,'administrator replacement') RETURNING id"
+    A $adminDelete "NOT EXISTS (SELECT 1 FROM professional_management.specialty WHERE id=$ownedId)" 'Administrator-deleted specialty remains.'
+    $adminId = Scalar $adminDelete "INSERT INTO professional_management.specialty(name,description) VALUES ($neurology,'administrator replacement') RETURNING id"
     if ($adminId -eq $ownedId) { throw 'Replacement specialty unexpectedly reused the deleted ID.' }
 
-    L $adminDelete @('rollback-count','--count','11')
-    A $adminDelete "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status') AND to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professionals') IS NULL" 'Rollbacks for grants, roles, indexes, 009, 004, 011, 010, 008, 007, and 006 must restore tables to public and remove lifecycle columns.'
+    # Rolls back 15 changesets: the three DCL changesets, both index changesets,
+    # ddl-alter-014, ddl-alter-013, ddl-alter-012, ddl-alter-009, ddl-tables-004,
+    # ddl-alter-011, ddl-alter-010, ddl-alter-008, ddl-alter-007 and 006. That
+    # reverts 012, which restores the historical plural table names, and 007, which
+    # moves them back to public. 006 reverts cleanly here because the professionals
+    # table is empty: the scenario deleted the only seed-created row and the
+    # replacement specialty is unreferenced. The rollback of 006 also drops
+    # idx_professionals_status, so the assertion below checks the historical name
+    # is gone, not present.
+    L $adminDelete @('rollback-count','--count','15')
+    A $adminDelete "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status') AND to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL" 'Rollbacks through 006 must restore the plural tables to public and drop the lifecycle columns and their index.'
     L $adminDelete @('rollback-count','--count','1')
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Ownership FK rollback must restore NO ACTION.'
     L $adminDelete @('rollback-count','--count','1')
@@ -344,9 +375,11 @@ try {
     $transitionSpecialtyId = Scalar $transition "SELECT id FROM public.specialties WHERE name='Medicina General'"
     P $transition "INSERT INTO public.professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000099,'TEST-MIGRATION-TRANSITION-006',$transitionSpecialtyId,0)"
     L $transition @('update'); Schema $transition
-    A $transition "EXISTS (SELECT 1 FROM professional_management.professionals WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE')" 'Migration 006 must preserve unknown professional_type and default status to ACTIVE.'
+    A $transition "EXISTS (SELECT 1 FROM professional_management.professional WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE')" 'Migration 006 must preserve unknown professional_type and default status to ACTIVE.'
 
-    L $transition @('rollback-count', '--count', '10')
+    # Rolls back 14 changesets, leaving 006-add-professional-type-and-status as
+    # the next one to revert so its refusal guard can be exercised.
+    L $transition @('rollback-count', '--count', '14')
 
     $rollbackPreference = $ErrorActionPreference
     try {

@@ -27,10 +27,15 @@ source of truth and this document reflects their current state.
 
 ---
 
-## Table: `professional_management.specialties`
+## Table: `professional_management.specialty`
 
 **Purpose:** Catalog of medical specialties administered by Professional
-Management. Reference data used by `professionals.specialty_id`.
+Management. Reference data used by `professional.specialty_id`.
+
+**Naming history:** this table was created as `specialties` by the frozen changeset
+`001-create-specialties` and renamed to the singular `specialty` by
+`ddl-alter-012`, to satisfy Anexo A rule 1. The applied changesets were not edited
+(database standard, rule 12); the rename is a new migration.
 
 | Column | Type | Nullable | Default | Meaning |
 |---|---|---|---|---|
@@ -57,17 +62,22 @@ Ginecología, Ortopedia.
 
 ---
 
-## Table: `professional_management.professionals`
+## Table: `professional_management.professional`
 
 **Purpose:** Stores a registered healthcare professional profile. One row per
 professional.
+
+**Naming history:** this table was created as `professionals` by the frozen changeset
+`003-create-professionals` and renamed to the singular `professional` by
+`ddl-alter-012`, to satisfy Anexo A rule 1. The applied changesets were not edited
+(database standard, rule 12); the rename is a new migration.
 
 | Column | Type | Nullable | Default | Meaning |
 |---|---|---|---|---|
 | `id` | `bigint` (BIGSERIAL) | No | nextval | Primary key. |
 | `identity_user_id` | `bigint` | No | — | External reference to the Identity & Access account. No cross-database foreign key. Unique. |
 | `license_number` | `text` | No | — | Professional license number. Unique. |
-| `specialty_id` | `bigint` | No | — | Foreign key to `specialties.id`. |
+| `specialty_id` | `bigint` | No | — | Foreign key to `specialty.id`. |
 | `years_experience` | `integer` | No | `0` | Years of professional experience. |
 | `professional_type` | `text` | Yes | — | Domain classification. `NULL` during the registration-to-administration transition. |
 | `status` | `text` | No | `'ACTIVE'` | Profile lifecycle status within Professional Management. |
@@ -79,7 +89,7 @@ professional.
 | `pk_professionals` | Primary key | `(id)` |
 | `uq_professionals_identity_user_id` | Unique | `(identity_user_id)` |
 | `uq_professionals_license_number` | Unique | `(license_number)` |
-| `fk_professionals_specialty` | Foreign key | `specialty_id` → `specialties.id` `ON DELETE RESTRICT` |
+| `fk_professional_specialty` | Foreign key | `specialty_id` → `specialty.id` `ON DELETE RESTRICT` |
 | `chk_professionals_years_experience_nonnegative` | Check | `years_experience >= 0` |
 | `chk_professionals_professional_type` | Check | `professional_type IN ('GENERAL_PRACTITIONER','SPECIALIST')` |
 | `chk_professionals_status` | Check | `status IN ('ACTIVE','INACTIVE')` |
@@ -87,12 +97,20 @@ professional.
 | `chk_professionals_professional_type_length` | Check | `professional_type IS NULL OR char_length(professional_type) <= 30` |
 | `chk_professionals_status_length` | Check | `char_length(status) <= 20` |
 
+**Constraint naming:** the foreign key is the only constraint on this table whose
+name follows the singular table. `pk_professionals`, `uq_professionals_*`, and
+`chk_professionals_*` keep the historical plural `professionals` because they are
+frozen inside changesets `003` and `006` and were not renamed by `ddl-alter-012`.
+Anexo A rule 1 governs *table* names, not constraint names, and Anexo A rule 4 only
+requires every constraint to have an explicit name, which these already do. Renaming
+them is out of scope for this migration and is left to a separate PR.
+
 **Indexes:**
 
 | Name | Columns | Justification |
 |---|---|---|
-| `idx_professionals_specialty_id` | `(specialty_id)` | Covers the foreign-key column. |
-| `idx_professionals_status` | `(status)` | Filter by lifecycle status. |
+| `idx_professional_specialty_id` | `(specialty_id)` | Covers the foreign-key column. |
+| `idx_professional_status` | `(status)` | Filter by lifecycle status. |
 
 **Notes:**
 
@@ -124,7 +142,7 @@ Pre-existing administrator-created rows are preserved across seed rollbacks.
 | Name | Type | Definition |
 |---|---|---|
 | `pk_specialty_seed_ownership` | Primary key | `(changeset_id, specialty_id)` |
-| `fk_specialty_seed_ownership_specialty` | Foreign key | `specialty_id` → `specialties.id` `ON DELETE CASCADE` |
+| `fk_specialty_seed_ownership_specialty` | Foreign key | `specialty_id` → `specialty.id` `ON DELETE CASCADE` |
 
 **Indexes:**
 
@@ -157,7 +175,7 @@ instead of creating a new one.
 | Name | Type | Definition |
 |---|---|---|
 | `pk_idempotency_key` | Primary key | `(key)` |
-| `fk_idempotency_key_professional` | Foreign key | `professional_id` → `professionals.id` `ON DELETE CASCADE` |
+| `fk_idempotency_key_professional` | Foreign key | `professional_id` → `professional.id` `ON DELETE CASCADE` |
 | `chk_idempotency_key_length` | Check | `char_length(key) BETWEEN 8 AND 128` |
 
 **Indexes:**
@@ -206,13 +224,13 @@ same grants automatically.
 | Changeset ID | Object created or modified |
 |---|---|
 | `ddl-schemas-001` | Schema `professional_management` |
-| `001-create-specialties` | Table `specialties` |
+| `001-create-specialties` | Table `specialties` (later renamed to `specialty` by `ddl-alter-012`) |
 | `001a-create-specialty-seed-ownership` | Table `specialty_seed_ownership` |
-| `002-seed-specialties` | Seed rows in `specialties` (Medicina General, Pediatría, Dermatología, Cardiología) |
-| `004-seed-additional-specialties` | Seed rows in `specialties` (Neurología, Ginecología, Ortopedia) |
-| `003-create-professionals` | Table `professionals` |
+| `002-seed-specialties` | Seed rows in `specialty` (Medicina General, Pediatría, Dermatología, Cardiología) |
+| `004-seed-additional-specialties` | Seed rows in `specialty` (Neurología, Ginecología, Ortopedia) |
+| `003-create-professionals` | Table `professionals` (later renamed to `professional` by `ddl-alter-012`) |
 | `005-cascade-deleted-specialty-ownership` | FK `fk_specialty_seed_ownership_specialty` changed to `ON DELETE CASCADE` |
-| `006-add-professional-type-and-status` | Columns `professional_type`, `status`, their CHECKs, index `idx_professionals_status` |
+| `006-add-professional-type-and-status` | Columns `professional_type`, `status`, their CHECKs, index `idx_professional_status` |
 | `ddl-alter-007` | Move all domain tables from `public` to `professional_management` |
 | `ddl-alter-008` | Rename CHECK constraints from `ck_*` to `chk_*` |
 | `ddl-tables-004` | Table `idempotency_key` |
@@ -223,6 +241,10 @@ same grants automatically.
 | `001-create-roles` | Roles `professional_management_reader`, `professional_management_writer` |
 | `001-grants` | Schema and table grants; default privileges |
 | `dcl-grants-002` | Explicit grants on `idempotency_key` |
+| `ddl-alter-012` | Rename `specialties` → `specialty` and `professionals` → `professional` (Anexo A rule 1) |
+| `ddl-alter-013` | Re-declare `fk_professional_specialty` from `04_alter` on the renamed tables, added `NOT VALID` to avoid an `ACCESS EXCLUSIVE` full-table scan (Anexo A rule 2, norma 5.2.2) |
+| `ddl-alter-014` | `VALIDATE CONSTRAINT fk_professional_specialty` under `SHARE UPDATE EXCLUSIVE`; completes the expand/contract pair |
+| `ddl-indexes-002` | Re-create `idx_professional_specialty_id`, `idx_professional_status` and `idx_idempotency_key_professional_id` in `10_indexes` with `CONCURRENTLY` (Anexo A rules 3 and 14) |
 
 ---
 
@@ -235,7 +257,7 @@ same grants automatically.
 | Appointment lifecycle | Appointment Scheduling |
 | Clinical content, consultation notes | Medical / Consultation |
 
-The `professionals.identity_user_id` column holds a reference to data owned
+The `professional.identity_user_id` column holds a reference to data owned
 by Identity & Access. It is stored as a plain `bigint` with a UNIQUE
 constraint and no foreign key, per numeral 7.4 of the standard (integrity
 between domains is enforced by contract, not by the database engine).

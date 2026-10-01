@@ -10,8 +10,8 @@ documentation and governance live in [`telemed-ia-docs`](https://github.com/code
 ## Database scope
 
 This repository contains the PostgreSQL schema, Liquibase migrations/changelog, initial seed data,
-and database tests for the Professional Management bounded context. It contains the `specialties`
-and `professionals` tables;
+and database tests for the Professional Management bounded context. It contains the `specialty`
+and `professional` tables;
 `identity_user_id` is
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
@@ -21,14 +21,18 @@ All domain tables live in the `professional_management` schema. Liquibase's own
 Liquibase creates them there by default; this is the only exception to the rule
 that nothing lives in `public`.
 
-Each `professionals` row represents a professional registered in Professional Management. The
+Each `professional` row represents a professional registered in Professional Management. The
 `status` field expresses the profile lifecycle: `ACTIVE` means the professional is active and
 available within this bounded context; `INACTIVE` means the record remains registered while the
 professional is inactive. `status` is independent of `professional_type`. A professional may
 initially be created with `professional_type` set to `NULL`; an administrator later classifies the
 profile as `GENERAL_PRACTITIONER` or `SPECIALIST`. This bounded context does not currently define
 soft deletion or normal administrator deletion of professionals. The catalog administration scope
-is `specialties`.
+is `specialty`.
+
+The `specialty` and `professional` tables were created as `specialties` and `professionals` by the
+frozen changesets `001` and `003`. Changeset `ddl-alter-012` renames them to the singular required
+by Anexo A rule 1 without editing the applied history.
 
 Migrations use Liquibase and are defined in
 [`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
@@ -47,9 +51,34 @@ owned sequences. Changeset `ddl-alter-008` in `04_alter` renames the professiona
 constraints from `ck_*` to `chk_*`. Changeset `ddl-indexes-001` in `10_indexes` adds the
 missing index on `specialty_seed_ownership.specialty_id`.
 
+Four later changesets align the schema with the database standard without editing any
+already-applied changeset (database standard, rule 12). `ddl-alter-012` renames `specialties`
+to `specialty` and `professionals` to `professional` (Anexo A rule 1, singular names).
+`ddl-alter-013` drops and re-adds the specialty foreign key as `fk_professional_specialty`
+so it is declared from `04_alter` (Anexo A rule 2 and norma 5.2.2); it is added `NOT VALID`
+so the change takes only a `SHARE UPDATE EXCLUSIVE` lock instead of `ACCESS EXCLUSIVE`.
+`ddl-alter-014` then runs `VALIDATE CONSTRAINT` on that same foreign key, completing the
+expand/contract pair without ever holding an `ACCESS EXCLUSIVE` lock on `professional`.
+`ddl-indexes-002` re-creates the
+three domain indexes in `10_indexes` with `CONCURRENTLY` and singular names (Anexo A
+rules 3 and 14); it is registered with `runInTransaction: false` because
+`CREATE INDEX CONCURRENTLY` cannot run inside a transaction block. Its three
+`DROP INDEX CONCURRENTLY` statements do the same on the way out, so neither the
+migration nor its rollback blocks concurrent reads and writes on a domain table.
+
 The actual application order is `ddl-schemas-001` → `001` → `001a` → `002` → `004` →
-`003` → `005` → `006` → `ddl-alter-007` → `ddl-alter-008` → `ddl-indexes-001` →
-`001-create-roles` → `001-grants`.
+`003` → `005` → `006` → `ddl-alter-007` → `ddl-alter-008` → `ddl-alter-010` →
+`ddl-alter-011` → `ddl-tables-004` → `ddl-alter-009` → `ddl-indexes-001` →
+`ddl-alter-012` → `ddl-alter-013` → `ddl-alter-014` →
+`ddl-indexes-002` → `001-create-roles` → `001-grants` →
+`dcl-grants-002`.
+
+`ddl-alter-012`, `ddl-alter-013`, and `ddl-alter-014` are registered in
+`01_ddl/03_tables/changelog-post-alter.yaml` rather than in `04_alter/changelog.yaml`, because
+`ddl-tables-004` still references the historical name `professional_management.professionals`.
+That fragment is included after `04_alter/changelog.yaml`, so registering the renames in
+`04_alter` would make `ddl-tables-004` fail. This is the same ordering rule already used by
+`ddl-alter-009`.
 
 Use `logicalFilePath` only for historical changesets whose physical SQL path changed during
 repository reorganization. Its value must preserve the exact historical logical path used by
@@ -57,17 +86,17 @@ Liquibase, and existing values must not be changed. New changesets should normal
 physical path; do not copy `logicalFilePath` as a template. Use a different logical path only for an
 explicit, documented compatibility reason.
 
-Both seed changesets need only `specialties` and the ownership ledger; creating `professionals`
+Both seed changesets need only `specialty` and the ownership ledger; creating `professional`
 after both seed groups makes reverse-order rollback safe with its restrictive specialty foreign key.
 Migration `006` adds `professional_type` (`GENERAL_PRACTITIONER` or `SPECIALIST`) and `status`
-(`ACTIVE` or `INACTIVE`) to `professionals`. During this transition, `professional_type` is nullable
+(`ACTIVE` or `INACTIVE`) to `professional`. During this transition, `professional_type` is nullable
 because historical data does not establish each existing professional's type; the migration does
 not backfill or default it. `status` defaults to `ACTIVE` so inserts using the current Professional
 API contract, which omits both new fields, remain compatible. Rolling back changeset 006 drops both
 columns and its status index only when no professional records exist. If any row exists, rollback
 fails before removing anything because `professional_type` or `status` may contain a later domain
 decision; the schema cannot distinguish `ACTIVE` supplied by the default from `ACTIVE` chosen
-subsequently. No historical professional type is backfilled. An empty `professionals` table is
+subsequently. No historical professional type is backfilled. An empty `professional` table is
 therefore required to roll back 006 safely.
 
 ## Access control
@@ -98,7 +127,7 @@ Seed changesets record ownership only for specialty rows they actually insert. P
 specialties skipped by `ON CONFLICT` are never claimed. Fresh databases can roll back seed-created
 rows, while legacy rows remain unowned and are preserved because historical ownership cannot be
 inferred. Legacy seed rollback removes Liquibase history but preserves unowned rows; a complete
-rollback drops the catalog when changeset 001 removes `specialties`.
+rollback drops the catalog when changeset 001 removes the specialty table.
 
 The deployment configuration is [`deploy/compose.yml`](deploy/compose.yml). Copy `.env.example`
 to `.env` and set the database name, user, password, and optional port before starting; `.env` is
@@ -113,9 +142,9 @@ execution order is fixed from the start.
 
 The historical DDL split is preserved: `01_ddl/changelog.yaml` runs the
 catalog table and ownership ledger before the seeds; `01_ddl/changelog-post-dml.yaml`
-runs the professionals table, its constraints, and its indexes after the seeds.
+runs the professional table, its constraints, and its indexes after the seeds.
 This keeps reverse-order rollback safe with the restrictive foreign key from
-`professionals.specialty_id` to `specialties.id`.
+`professional.specialty_id` to `specialty.id`.
 
 ### Rollback layout
 
@@ -142,7 +171,7 @@ See [`05_rollbacks/README.md`](05_rollbacks/README.md) for details.
 
 An administrator may create and edit specialties. An administrator may delete a specialty only when no professionals are associated with it.
 This is a hard delete, not a soft delete. If professionals reference the specialty, PostgreSQL
-rejects the deletion through the `professionals.specialty_id -> specialties.id` foreign key.
+rejects the deletion through the `professional.specialty_id -> specialty.id` foreign key.
 The FK explicitly uses `ON DELETE RESTRICT`; deleting a specialty can never delete professionals
 automatically. The seed ownership FK uses `ON DELETE CASCADE` only to remove its metadata row when
 an unused specialty is deleted; seed rollback then has no ownership record for that row and cannot
@@ -167,7 +196,7 @@ column is constrained to 8-128 characters, matching the database standard.
 Domain tables live in `professional_management`, not in `public`. Consumers
 of this database must either:
 
-- qualify table names (`professional_management.professionals`), or
+- qualify table names (`professional_management.professional`), or
 - set `search_path = professional_management, public` in the connection.
 
 Relying on the default `search_path = public` and unqualified names will fail
@@ -267,17 +296,17 @@ the schema objects is documented below.
 
 | Requirement | Schema object | Changeset |
 |---|---|---|
-| Administer the medical specialty catalog | Table `specialties` | `001-create-specialties` |
-| Initial catalog with seven specialties | Seed rows in `specialties` | `002-seed-specialties`, `004-seed-additional-specialties` |
-| Register healthcare professionals | Table `professionals` | `003-create-professionals` |
+| Administer the medical specialty catalog | Table `specialty` | `001-create-specialties` (renamed by `ddl-alter-012`) |
+| Initial catalog with seven specialties | Seed rows in `specialty` | `002-seed-specialties`, `004-seed-additional-specialties` |
+| Register healthcare professionals | Table `professional` | `003-create-professionals` (renamed by `ddl-alter-012`) |
 | Classify professionals as general practitioner or specialist | `professional_type` column with CHECK | `006-add-professional-type-and-status` |
 | Professional lifecycle status within Professional Management | `status` column with CHECK | `006-add-professional-type-and-status` |
-| Delete a specialty only when unreferenced | FK `fk_professionals_specialty` `ON DELETE RESTRICT` | `003-create-professionals` |
+| Delete a specialty only when unreferenced | FK `fk_professional_specialty` `ON DELETE RESTRICT` | `003-create-professionals`, re-declared by `ddl-alter-013` and validated by `ddl-alter-014` |
 | Seed data that can be rolled back without affecting administrator rows | Table `specialty_seed_ownership` | `001a-create-specialty-seed-ownership`, `005-cascade-deleted-specialty-ownership` |
 | Idempotent HTTP creation of professionals | Table `idempotency_key` | `ddl-tables-004` |
 | Detect a retry with the same key but different body | Column `idempotency_key.request_hash` | `ddl-alter-009` |
 
-**Status:** all requirements are implemented in the 18 changesets of this
+**Status:** all requirements are implemented in the 22 changesets of this
 repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONARY.md).
 
 ## Branching

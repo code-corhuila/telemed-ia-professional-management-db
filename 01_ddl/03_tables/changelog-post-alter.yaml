@@ -1,6 +1,12 @@
 databaseChangeLog:
   # Post-alter DDL: creates tables that depend on the domain schema being
-  # populated (professional_management.* tables live there after ddl-alter-007).
+  # populated (professional_management.* tables live there after ddl-alter-007),
+  # then applies the Anexo A schema-conformance migrations.
+  #
+  # ddl-alter-009 alters idempotency_key, so it must run after ddl-tables-004
+  # creates that table. It is registered here, in the changelog fragment that
+  # runs immediately after it, rather than in 04_alter/changelog.yaml, because
+  # that fragment is included BEFORE this one and would fail on a missing table.
   - changeSet:
       id: ddl-tables-004
       author: telemed
@@ -29,3 +35,58 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/04_alter/009_add_request_hash.rollback.sql
             relativeToChangelogFile: true
+  # Schema-conformance migrations.
+  #
+  # ddl-alter-012 and ddl-alter-013 are declared here, and not in
+  # 04_alter/changelog.yaml, because of execution order.
+  # 04_alter/changelog.yaml is included BEFORE 03_tables/changelog-post-alter.yaml,
+  # and ddl-tables-004 above still references the historical table name
+  # professional_management.professionals. Renaming that table from
+  # 04_alter/changelog.yaml would make ddl-tables-004 fail with
+  # 'relation "professional_management.professionals" does not exist'.
+  # Registering them after ddl-tables-004 keeps the whole changelog applicable
+  # from an empty database, which is the cycle the CI rebuild job exercises.
+  # This is the same reasoning already applied to ddl-alter-009.
+  - changeSet:
+      id: ddl-alter-012
+      author: telemed
+      comment: "Rename the domain tables to singular to satisfy Anexo A rule 1."
+      changes:
+        - sqlFile:
+            path: ../04_alter/012_rename_domain_tables_to_singular.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/012_rename_domain_tables_to_singular.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-013
+      author: telemed
+      comment: "Re-declare fk_professional_specialty from 04_alter to satisfy Anexo A rule 2."
+      changes:
+        - sqlFile:
+            path: ../04_alter/013_recreate_professional_specialty_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/013_recreate_professional_specialty_fk.rollback.sql
+            relativeToChangelogFile: true
+  # ddl-alter-014 is the second half of the ddl-alter-013 FK migration. It must
+  # stay immediately after ddl-alter-013, in this same fragment, because it
+  # validates a constraint on professional_management.professional under its new
+  # singular name. Moving it to 04_alter/changelog.yaml would run it before
+  # ddl-alter-012 renames the table, and VALIDATE CONSTRAINT would fail with
+  # 'constraint "fk_professional_specialty" of relation "professional" does not exist'.
+  - changeSet:
+      id: ddl-alter-014
+      author: telemed
+      comment: "Validate fk_professional_specialty added NOT VALID by ddl-alter-013."
+      changes:
+        - sqlFile:
+            path: ../04_alter/014_validate_professional_specialty_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/014_validate_professional_specialty_fk.rollback.sql
+            relativeToChangelogFile: true
+
