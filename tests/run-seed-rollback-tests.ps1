@@ -13,7 +13,7 @@ if ($databases.Count -ne $kinds.Count -or
     @($databases | Select-Object -Unique).Count -ne $kinds.Count) {
     throw 'Test database names must be unique and include this run identifier.'
 }
-$scratchRoot = Join-Path $env:TEMP $network
+$scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) $network
 $legacyRoot = Join-Path $scratchRoot 'legacy'
 $passwordBytes = New-Object byte[] 32
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -52,7 +52,7 @@ function Schema([string]$Db) {
 }
 function L([string]$Db, [string[]]$Command) {
     if ($legacyMode) {
-        $source = Join-Path $legacyRoot 'db\changelog'
+        $source = Join-Path $legacyRoot 'db/changelog'
         $target = '/liquibase/changelog'
         $work = $target
         $file = 'db.changelog-master.yaml'
@@ -135,7 +135,7 @@ try {
     D @('run', '-d', '--name', $container, '--network', $network,
         '-e', 'POSTGRES_USER=test_user', '-e', "POSTGRES_PASSWORD=$password",
         '-e', 'POSTGRES_DB=postgres', '--mount',
-        "type=bind,source=$root\tests\sql,target=/tests,readonly", 'postgres:16-alpine')
+        "type=bind,source=$root/tests/sql,target=/tests,readonly", 'postgres:16-alpine')
     $containerCreated = $true
     $ready = $false
     for ($i=0; $i -lt 60; $i++) {
@@ -237,8 +237,8 @@ try {
     Collision $databases[3] 'Neurología' $neurology '004-seed-additional-specialties' 2 5 4
 
     $legacy = $databases[4]; NewDb $legacy
-    New-Item -ItemType Directory -Path (Join-Path $legacyRoot 'db\changelog') -Force | Out-Null
-    Copy-Item (Join-Path $root 'tests\fixtures\legacy-changelog\*') (Join-Path $legacyRoot 'db\changelog') -Recurse
+    New-Item -ItemType Directory -Path (Join-Path $legacyRoot 'db/changelog') -Force | Out-Null
+    Copy-Item (Join-Path $root 'tests/fixtures/legacy-changelog/*') (Join-Path $legacyRoot 'db/changelog') -Recurse
     $legacyMode = $true; L $legacy @('update')
     A $legacy "(SELECT count(*) FROM databasechangelog WHERE (id='002-seed-specialties' AND md5sum='9:f5719d18ef7771621c69be4f04fb4e73') OR (id='004-seed-additional-specialties' AND md5sum='9:3df6ef3fc67dc17d4114f63e16325e7a'))=2" 'Legacy checksums differ from expected.'
     $legacyMode = $false; L $legacy @('validate'); L $legacy @('update')
@@ -268,7 +268,7 @@ try {
     $legacyMode = $true; L $legacyFk @('update')
     $neuroId = Scalar $legacyFk "SELECT id FROM specialties WHERE name=$neurology"
     P $legacyFk "INSERT INTO professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000002,'TEST-LEGACY-FK-001',$neuroId,0)"
-    $legacyMount = "type=bind,source=$(Join-Path $legacyRoot 'db\changelog'),target=/liquibase/changelog,readonly"
+    $legacyMount = "type=bind,source=$(Join-Path $legacyRoot 'db/changelog'),target=/liquibase/changelog,readonly"
     $legacyArgs = @('run', '--rm', '--network', $network, '--workdir', '/liquibase/changelog', '--mount', $legacyMount,
         'liquibase/liquibase:4.31', "--url=jdbc:postgresql://${container}:5432/$legacyFk", '--username=test_user',
         "--password=$password", '--changelog-file=db.changelog-master.yaml', 'rollback-count', '--count', '1')
