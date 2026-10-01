@@ -89,6 +89,16 @@ jobs:
           TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
         run: docker compose -f docker-compose.test.yml run --rm liquibase update
 
+      - name: Run seed rollback integration tests
+        shell: pwsh
+        env:
+          TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
+        run: |
+          # The runner creates its own ephemeral PostgreSQL container
+          # (docker network create + docker run), independently of the
+          # compose service used by the steps above.
+          pwsh -NoProfile -File ./tests/run-seed-rollback-tests.ps1
+
       - name: Run schema tests
         env:
           TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}

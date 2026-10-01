@@ -231,10 +231,12 @@ docker compose -p professional-management-db-test -f docker-compose.test.yml dow
 - `tests/run-db-tests.ps1`: reconstructs the schema, verifies the second
   update is a no-op, rolls back completely, verifies empty, and reapplies.
   Runs in CI and locally.
-- `tests/run-seed-rollback-tests.ps1`: nine integration scenarios for the
-  seed ownership ledger, legacy checksums, and rollback ordering. Runs
-  locally only; it depends on Windows shell features not available in the
-  GitHub Actions runner.
+- `tests/run-seed-rollback-tests.ps1` exercises nine integration scenarios
+  (seed ownership ledger, legacy checksums, staged rollback ordering). It
+  runs both locally and in CI: the workflow executes it on `pwsh` over
+  `ubuntu-latest`. The script uses cross-platform path construction
+  (`[System.IO.Path]::GetTempPath()` and forward slashes) so the same file
+  works on Windows and Linux.
 - `tests/sql/professional-schema-tests.sql`: schema, constraints, roles,
   privileges, and seed assertions. Runs in CI (via psql) and locally.
 
