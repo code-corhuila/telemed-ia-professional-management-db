@@ -44,7 +44,8 @@ immediately after `01_ddl/04_alter/changelog.yaml` and holds changesets
 that depend on objects created later in the sequence. Today it holds
 `ddl-tables-004` (idempotency_key, which references `professional`)
 and the follow-up alters `ddl-alter-009`, `ddl-alter-012`, `ddl-alter-013`,
-and `ddl-alter-014`. The root changelog coordinates the DDL phases around `02_dml` to
+`ddl-alter-014`, `ddl-alter-015`, `ddl-alter-016`, `ddl-alter-017`, and
+`ddl-alter-018`. The root changelog coordinates the DDL phases around `02_dml` to
 preserve the historical execution and rollback order: `001` → `001a` → `002` → `004` → `003` →
 `005` → `006`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
 
@@ -72,14 +73,28 @@ rules 3 and 14); it is registered with `runInTransaction: false` because
 `DROP INDEX CONCURRENTLY` statements do the same on the way out, so neither the
 migration nor its rollback blocks concurrent reads and writes on a domain table.
 
+Four more changesets finish the same alignment without touching any applied changeset.
+`ddl-alter-015` drops and re-adds `fk_specialty_seed_ownership_specialty`, which changeset
+`001a` declared inline, and `ddl-alter-017` does the same for
+`fk_idempotency_key_professional`, which `ddl-tables-004` declared inline. Both now live in
+`04_alter` as Anexo A rule 2 requires, and both keep the `ON DELETE CASCADE` they already
+had. Like `ddl-alter-013`, each is added `NOT VALID` so the change takes only a
+`SHARE UPDATE EXCLUSIVE` lock; `ddl-alter-016` and `ddl-alter-018` then run
+`VALIDATE CONSTRAINT` on them, completing the pair without an `ACCESS EXCLUSIVE` lock.
+`ddl-indexes-003` re-creates `idx_specialty_seed_ownership_specialty_id` with
+`CREATE INDEX CONCURRENTLY`, because `ddl-indexes-001` built it without `CONCURRENTLY` on a
+table that the seeds had already populated (Anexo A rule 14); it is registered with
+`runInTransaction: false` for the same mandatory reason.
+
 The actual application order is `ddl-schemas-001` → `001` → `001a` → `002` → `004` →
 `003` → `005` → `006` → `ddl-alter-007` → `ddl-alter-008` → `ddl-alter-010` →
 `ddl-alter-011` → `ddl-tables-004` → `ddl-alter-009` → `ddl-alter-012` →
-`ddl-alter-013` → `ddl-alter-014` → `ddl-indexes-001` →
-`ddl-indexes-002` → `001-create-roles` → `001-grants` →
-`dcl-grants-002`.
+`ddl-alter-013` → `ddl-alter-014` → `ddl-alter-015` → `ddl-alter-016` → `ddl-alter-017` →
+`ddl-alter-018` → `ddl-indexes-001` → `ddl-indexes-002` → `ddl-indexes-003` →
+`001-create-roles` → `001-grants` → `dcl-grants-002`. That is 27 changesets.
 
-`ddl-alter-012`, `ddl-alter-013`, and `ddl-alter-014` are registered in
+`ddl-alter-012`, `ddl-alter-013`, `ddl-alter-014`, `ddl-alter-015`, `ddl-alter-016`,
+`ddl-alter-017`, and `ddl-alter-018` are registered in
 `01_ddl/03_tables/changelog-post-alter.yaml` rather than in `04_alter/changelog.yaml`, because
 `ddl-tables-004` still references the historical name `professional_management.professionals`.
 That fragment is included after `04_alter/changelog.yaml`, so registering the renames in
@@ -311,11 +326,11 @@ the schema objects is documented below.
 | Classify professionals as general practitioner or specialist | `professional_type` column with CHECK | `006-add-professional-type-and-status` |
 | Professional lifecycle status within Professional Management | `status` column with CHECK | `006-add-professional-type-and-status` |
 | Delete a specialty only when unreferenced | FK `fk_professional_specialty` `ON DELETE RESTRICT` | `003-create-professionals`, re-declared by `ddl-alter-013` and validated by `ddl-alter-014` |
-| Seed data that can be rolled back without affecting administrator rows | Table `specialty_seed_ownership` | `001a-create-specialty-seed-ownership`, `005-cascade-deleted-specialty-ownership` |
-| Idempotent HTTP creation of professionals | Table `idempotency_key` | `ddl-tables-004` |
+| Seed data that can be rolled back without affecting administrator rows | Table `specialty_seed_ownership` | `001a-create-specialty-seed-ownership`, `005-cascade-deleted-specialty-ownership`, FK re-declared by `ddl-alter-015` and validated by `ddl-alter-016` |
+| Idempotent HTTP creation of professionals | Table `idempotency_key` | `ddl-tables-004`, FK re-declared by `ddl-alter-017` and validated by `ddl-alter-018` |
 | Detect a retry with the same key but different body | Column `idempotency_key.request_hash` | `ddl-alter-009` |
 
-**Status:** all requirements are implemented in the 22 changesets of this
+**Status:** all requirements are implemented in the 27 changesets of this
 repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONARY.md).
 
 ## Historical commit message debt
