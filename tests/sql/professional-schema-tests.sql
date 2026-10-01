@@ -186,6 +186,25 @@ BEGIN
           AND indexdef ILIKE '%(specialty_id)%') <> 1
     THEN RAISE EXCEPTION 'Expected specialty_seed_ownership specialty_id index'; END IF;
 
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.specialty_seed_ownership'::regclass
+          AND conname = 'fk_specialty_seed_ownership_specialty'
+          AND contype = 'f'
+          AND confdeltype = 'c') <> 1
+    THEN RAISE EXCEPTION 'Expected ownership FK with ON DELETE CASCADE'; END IF;
+
+    -- ddl-alter-015 re-declares this FK from 04_alter with NOT VALID and
+    -- ddl-alter-016 validates it. convalidated = false would mean the expand
+    -- half ran without its contract half, leaving existing rows unchecked.
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.specialty_seed_ownership'::regclass
+          AND conname = 'fk_specialty_seed_ownership_specialty'
+          AND contype = 'f'
+          AND convalidated = true
+          AND confrelid = 'professional_management.specialty'::regclass
+          AND pg_get_constraintdef(oid) ILIKE '%ON DELETE CASCADE%') <> 1
+    THEN RAISE EXCEPTION 'Expected validated fk_specialty_seed_ownership_specialty with ON DELETE CASCADE'; END IF;
+
     -- The UNIQUE constraints renamed by ddl-alter-010 must still reject
     -- duplicates. Each block raises a plain exception when the insert is
     -- wrongly accepted; only unique_violation is swallowed, so an accepted
@@ -300,6 +319,20 @@ BEGIN
 
     IF (SELECT COUNT(*) FROM pg_constraint WHERE conname = 'fk_idempotency_key_professional' AND contype = 'f' AND confdeltype = 'c') <> 1 THEN
         RAISE EXCEPTION 'Expected foreign key fk_idempotency_key_professional with ON DELETE CASCADE';
+    END IF;
+
+    -- ddl-alter-017 re-declares this FK from 04_alter with NOT VALID and
+    -- ddl-alter-018 validates it, so the constraint must be marked validated
+    -- after a full update: convalidated = false would mean the expand half ran
+    -- without its contract half and orphan rows are still unchecked.
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.idempotency_key'::regclass
+          AND conname = 'fk_idempotency_key_professional'
+          AND contype = 'f'
+          AND convalidated = true
+          AND confrelid = 'professional_management.professional'::regclass
+          AND pg_get_constraintdef(oid) ILIKE '%ON DELETE CASCADE%') <> 1 THEN
+        RAISE EXCEPTION 'Expected validated fk_idempotency_key_professional with ON DELETE CASCADE';
     END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
