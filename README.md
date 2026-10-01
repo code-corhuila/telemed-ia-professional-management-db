@@ -10,8 +10,8 @@ documentation and governance live in [`telemed-ia-docs`](https://github.com/code
 ## Database scope
 
 This repository contains the PostgreSQL schema, Liquibase migrations/changelog, initial seed data,
-and database tests for the Professional Management bounded context. It contains the `specialty`
-and `professional` tables;
+and database tests for the Professional Management bounded context. It contains the `specialty`,
+`professional`, `specialty_seed_ownership`, and `idempotency_key` tables;
 `identity_user_id` is
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
@@ -38,7 +38,13 @@ Migrations use Liquibase and are defined in
 [`changelog/changelog-master.yaml`](changelog/changelog-master.yaml), the single entry point.
 The four migration families are `01_ddl`, `02_dml`, `03_dcl`, and `04_tcl`. The `01_ddl` family
 intentionally has two changelog fragments: `01_ddl/changelog.yaml` and
-`01_ddl/changelog-post-dml.yaml`. The root changelog coordinates the DDL phases around `02_dml` to
+`01_ddl/changelog-post-dml.yaml`. A third fragment,
+`01_ddl/03_tables/changelog-post-alter.yaml`, runs
+immediately after `01_ddl/04_alter/changelog.yaml` and holds changesets
+that depend on objects created later in the sequence. Today it holds
+`ddl-tables-004` (idempotency_key, which references `professional`)
+and the follow-up alters `ddl-alter-009`, `ddl-alter-012`, `ddl-alter-013`,
+and `ddl-alter-014`. The root changelog coordinates the DDL phases around `02_dml` to
 preserve the historical execution and rollback order: `001` → `001a` → `002` → `004` → `003` →
 `005` → `006`. Contributors must not assume that all DDL runs before all DML; this split is intentional.
 
@@ -68,8 +74,8 @@ migration nor its rollback blocks concurrent reads and writes on a domain table.
 
 The actual application order is `ddl-schemas-001` → `001` → `001a` → `002` → `004` →
 `003` → `005` → `006` → `ddl-alter-007` → `ddl-alter-008` → `ddl-alter-010` →
-`ddl-alter-011` → `ddl-tables-004` → `ddl-alter-009` → `ddl-indexes-001` →
-`ddl-alter-012` → `ddl-alter-013` → `ddl-alter-014` →
+`ddl-alter-011` → `ddl-tables-004` → `ddl-alter-009` → `ddl-alter-012` →
+`ddl-alter-013` → `ddl-alter-014` → `ddl-indexes-001` →
 `ddl-indexes-002` → `001-create-roles` → `001-grants` →
 `dcl-grants-002`.
 
@@ -259,7 +265,10 @@ docker compose -p professional-management-db-test -f docker-compose.test.yml dow
 
 - `tests/run-db-tests.ps1`: reconstructs the schema, verifies the second
   update is a no-op, rolls back completely, verifies empty, and reapplies.
-  Runs in CI and locally.
+  Runs locally. Its equivalent coverage is provided in CI by the
+  `Liquibase update (fresh)` / `Liquibase update (must apply zero changesets)` /
+  `Liquibase rollback (all)` / `Verify schema is empty after rollback` /
+  `Liquibase update (reapply)` steps of `.github/workflows/db-ci.yml`.
 - `tests/run-seed-rollback-tests.ps1` exercises nine integration scenarios
   (seed ownership ledger, legacy checksums, staged rollback ordering). It
   runs both locally and in CI: the workflow executes it on `pwsh` over

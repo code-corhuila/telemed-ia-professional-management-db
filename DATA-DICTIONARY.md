@@ -17,6 +17,14 @@ source of truth and this document reflects their current state.
 - Constraint prefixes: `pk_` (primary key), `fk_` (foreign key), `uq_`
   (unique), `chk_` (check). Every constraint has an explicit name so a
   later migration can reference it.
+- Constraint prefix `nn_` for NOT NULL is declared in some historical
+  changesets (001a, 003) but PostgreSQL does not materialize a column-
+  level `CONSTRAINT nn_... NOT NULL` as an entry in `pg_constraint`:
+  the name is discarded and the constraint lives in
+  `pg_attribute.attnotnull`. New migrations should not use `nn_` and
+  should rely on the `NOT NULL` keyword alone, or declare the constraint
+  via `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL` if a name is
+  required for later reference.
 - Index prefixes: `idx_<table>_<columns>`.
 - Text columns are `text` with an explicit `CHECK (char_length(...) <= n)`
   where the business fixes a limit; not `VARCHAR(n)`.
@@ -176,7 +184,7 @@ instead of creating a new one.
 |---|---|---|
 | `pk_idempotency_key` | Primary key | `(key)` |
 | `fk_idempotency_key_professional` | Foreign key | `professional_id` → `professional.id` `ON DELETE CASCADE` |
-| `chk_idempotency_key_length` | Check | `char_length(key) BETWEEN 8 AND 128` |
+| `chk_idempotency_key_length` | Check | `length(key) BETWEEN 8 AND 128` |
 
 **Indexes:**
 
@@ -261,3 +269,32 @@ The `professional.identity_user_id` column holds a reference to data owned
 by Identity & Access. It is stored as a plain `bigint` with a UNIQUE
 constraint and no foreign key, per numeral 7.4 of the standard (integrity
 between domains is enforced by contract, not by the database engine).
+
+---
+
+## Notes on review findings
+
+These notes answer the automated review findings left on the data
+dictionary when it was introduced (PR #17).
+
+- **Idempotency enforcement.** The `key` column of `idempotency_key`
+  is a PRIMARY KEY (`pk_idempotency_key`), which is the mechanism that
+  enforces single-row-per-key at the database level. The application
+  logic (lookup-before-insert, return cached response on collision)
+  lives in the `-api` repository, not here.
+- **Changeset ID scheme.** The two ID schemes visible in this
+  dictionary (`NNN-description` for historical changesets 001-006 and
+  `ddl-<family>-NNN` for changesets 007 onwards) are intentional.
+  Historical checksums are frozen (rule 12) and cannot be renamed
+  without breaking every environment that applied them.
+- **Cascade semantics.** The `ON DELETE CASCADE` on
+  `fk_specialty_seed_ownership_specialty` removes only the ownership
+  metadata row when an unreferenced specialty is deleted. It does not
+  delete professionals or specialties. The rollback of
+  `005-cascade-deleted-specialty-ownership` restores the FK to
+  NO ACTION.
+- **Completeness check.** The CI workflow
+  (`.github/workflows/db-ci.yml`) is the mechanism that catches drift
+  when new changesets are added. Every merge to `develop`, `qa`, or
+  `main` runs `liquibase update` from an empty database, verifies
+  idempotency, runs full rollback, and reapplies.
