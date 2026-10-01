@@ -78,7 +78,8 @@ jobs:
           count=$(docker compose -f docker-compose.test.yml exec -T postgres \
             psql -U "$TEST_DB_USER" -d professional_management_test -tAc \
             "SELECT count(*) FROM information_schema.tables \
-             WHERE table_schema='public' AND table_type='BASE TABLE' \
+             WHERE table_schema NOT IN ('pg_catalog','information_schema') \
+             AND table_type='BASE TABLE' \
              AND table_name NOT IN ('databasechangelog','databasechangeloglock')")
           echo "Domain tables remaining: $count"
           [ "$count" = "0" ] || { echo "Domain tables remain after rollback" >&2; exit 1; }
@@ -87,6 +88,24 @@ jobs:
         env:
           TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
         run: docker compose -f docker-compose.test.yml run --rm liquibase update
+
+      - name: Run seed rollback integration tests
+        shell: pwsh
+        env:
+          TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
+        run: |
+          # The runner creates its own ephemeral PostgreSQL container
+          # (docker network create + docker run), independently of the
+          # compose service used by the steps above.
+          pwsh -NoProfile -File ./tests/run-seed-rollback-tests.ps1
+
+      - name: Run schema tests
+        env:
+          TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
+        run: |
+          docker compose -f docker-compose.test.yml exec -T -e PGPASSWORD="$TEST_DB_PASSWORD" \
+            postgres psql -U "$TEST_DB_USER" -d professional_management_test \
+            -X -v ON_ERROR_STOP=1 -f /tests/professional-schema-tests.sql
 
       - name: Cleanup
         if: always()
