@@ -89,13 +89,21 @@ professional.
 | `pk_professionals` | Primary key | `(id)` |
 | `uq_professionals_identity_user_id` | Unique | `(identity_user_id)` |
 | `uq_professionals_license_number` | Unique | `(license_number)` |
-| `fk_professionals_specialty` | Foreign key | `specialty_id` → `specialty.id` `ON DELETE RESTRICT` |
+| `fk_professional_specialty` | Foreign key | `specialty_id` → `specialty.id` `ON DELETE RESTRICT` |
 | `chk_professionals_years_experience_nonnegative` | Check | `years_experience >= 0` |
 | `chk_professionals_professional_type` | Check | `professional_type IN ('GENERAL_PRACTITIONER','SPECIALIST')` |
 | `chk_professionals_status` | Check | `status IN ('ACTIVE','INACTIVE')` |
 | `chk_professionals_license_number_length` | Check | `char_length(license_number) <= 80` |
 | `chk_professionals_professional_type_length` | Check | `professional_type IS NULL OR char_length(professional_type) <= 30` |
 | `chk_professionals_status_length` | Check | `char_length(status) <= 20` |
+
+**Constraint naming:** the foreign key is the only constraint on this table whose
+name follows the singular table. `pk_professionals`, `uq_professionals_*`, and
+`chk_professionals_*` keep the historical plural `professionals` because they are
+frozen inside changesets `003` and `006` and were not renamed by `ddl-alter-012`.
+Anexo A rule 1 governs *table* names, not constraint names, and Anexo A rule 4 only
+requires every constraint to have an explicit name, which these already do. Renaming
+them is out of scope for this migration and is left to a separate PR.
 
 **Indexes:**
 
@@ -234,7 +242,8 @@ same grants automatically.
 | `001-grants` | Schema and table grants; default privileges |
 | `dcl-grants-002` | Explicit grants on `idempotency_key` |
 | `ddl-alter-012` | Rename `specialties` → `specialty` and `professionals` → `professional` (Anexo A rule 1) |
-| `ddl-alter-013` | Re-declare `fk_professionals_specialty` from `04_alter` on the renamed tables (Anexo A rule 2, norma 5.2.2) |
+| `ddl-alter-013` | Re-declare `fk_professional_specialty` from `04_alter` on the renamed tables, added `NOT VALID` to avoid an `ACCESS EXCLUSIVE` full-table scan (Anexo A rule 2, norma 5.2.2) |
+| `ddl-alter-014` | `VALIDATE CONSTRAINT fk_professional_specialty` under `SHARE UPDATE EXCLUSIVE`; completes the expand/contract pair |
 | `ddl-indexes-002` | Re-create `idx_professional_specialty_id`, `idx_professional_status` and `idx_idempotency_key_professional_id` in `10_indexes` with `CONCURRENTLY` (Anexo A rules 3 and 14) |
 
 ---

@@ -51,22 +51,29 @@ owned sequences. Changeset `ddl-alter-008` in `04_alter` renames the professiona
 constraints from `ck_*` to `chk_*`. Changeset `ddl-indexes-001` in `10_indexes` adds the
 missing index on `specialty_seed_ownership.specialty_id`.
 
-Three later changesets align the schema with the database standard without editing any
+Four later changesets align the schema with the database standard without editing any
 already-applied changeset (database standard, rule 12). `ddl-alter-012` renames `specialties`
 to `specialty` and `professionals` to `professional` (Anexo A rule 1, singular names).
-`ddl-alter-013` drops and re-adds `fk_professionals_specialty` so the foreign key is
-declared from `04_alter` (Anexo A rule 2 and norma 5.2.2). `ddl-indexes-002` re-creates the
+`ddl-alter-013` drops and re-adds the specialty foreign key as `fk_professional_specialty`
+so it is declared from `04_alter` (Anexo A rule 2 and norma 5.2.2); it is added `NOT VALID`
+so the change takes only a `SHARE UPDATE EXCLUSIVE` lock instead of `ACCESS EXCLUSIVE`.
+`ddl-alter-014` then runs `VALIDATE CONSTRAINT` on that same foreign key, completing the
+expand/contract pair without ever holding an `ACCESS EXCLUSIVE` lock on `professional`.
+`ddl-indexes-002` re-creates the
 three domain indexes in `10_indexes` with `CONCURRENTLY` and singular names (Anexo A
 rules 3 and 14); it is registered with `runInTransaction: false` because
-`CREATE INDEX CONCURRENTLY` cannot run inside a transaction block.
+`CREATE INDEX CONCURRENTLY` cannot run inside a transaction block. Its three
+`DROP INDEX CONCURRENTLY` statements do the same on the way out, so neither the
+migration nor its rollback blocks concurrent reads and writes on a domain table.
 
 The actual application order is `ddl-schemas-001` → `001` → `001a` → `002` → `004` →
 `003` → `005` → `006` → `ddl-alter-007` → `ddl-alter-008` → `ddl-alter-010` →
-`ddl-alter-011` → `ddl-tables-004` → `ddl-alter-009` → `ddl-alter-012` → `ddl-alter-013` →
-`ddl-indexes-001` → `ddl-indexes-002` → `001-create-roles` → `001-grants` →
+`ddl-alter-011` → `ddl-tables-004` → `ddl-alter-009` → `ddl-indexes-001` →
+`ddl-alter-012` → `ddl-alter-013` → `ddl-alter-014` →
+`ddl-indexes-002` → `001-create-roles` → `001-grants` →
 `dcl-grants-002`.
 
-`ddl-alter-012` and `ddl-alter-013` are registered in
+`ddl-alter-012`, `ddl-alter-013`, and `ddl-alter-014` are registered in
 `01_ddl/03_tables/changelog-post-alter.yaml` rather than in `04_alter/changelog.yaml`, because
 `ddl-tables-004` still references the historical name `professional_management.professionals`.
 That fragment is included after `04_alter/changelog.yaml`, so registering the renames in
@@ -294,12 +301,12 @@ the schema objects is documented below.
 | Register healthcare professionals | Table `professional` | `003-create-professionals` (renamed by `ddl-alter-012`) |
 | Classify professionals as general practitioner or specialist | `professional_type` column with CHECK | `006-add-professional-type-and-status` |
 | Professional lifecycle status within Professional Management | `status` column with CHECK | `006-add-professional-type-and-status` |
-| Delete a specialty only when unreferenced | FK `fk_professionals_specialty` `ON DELETE RESTRICT` | `003-create-professionals`, re-declared by `ddl-alter-013` |
+| Delete a specialty only when unreferenced | FK `fk_professional_specialty` `ON DELETE RESTRICT` | `003-create-professionals`, re-declared by `ddl-alter-013` and validated by `ddl-alter-014` |
 | Seed data that can be rolled back without affecting administrator rows | Table `specialty_seed_ownership` | `001a-create-specialty-seed-ownership`, `005-cascade-deleted-specialty-ownership` |
 | Idempotent HTTP creation of professionals | Table `idempotency_key` | `ddl-tables-004` |
 | Detect a retry with the same key but different body | Column `idempotency_key.request_hash` | `ddl-alter-009` |
 
-**Status:** all requirements are implemented in the 21 changesets of this
+**Status:** all requirements are implemented in the 22 changesets of this
 repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONARY.md).
 
 ## Branching

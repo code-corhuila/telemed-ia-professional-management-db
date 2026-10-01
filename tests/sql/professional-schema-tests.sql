@@ -144,10 +144,20 @@ BEGIN
     THEN RAISE EXCEPTION 'Expected uq_professionals_license_number'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.professional'::regclass AND contype = 'f'
+        WHERE conrelid = 'professional_management.professional'::regclass
+          AND conname = 'fk_professional_specialty'
+          AND contype = 'f'
+          AND convalidated = true
           AND confrelid = 'professional_management.specialty'::regclass
           AND pg_get_constraintdef(oid) ILIKE '%ON DELETE RESTRICT%') <> 1
-    THEN RAISE EXCEPTION 'Expected restrictive specialty foreign key'; END IF;
+    THEN RAISE EXCEPTION 'Expected validated fk_professional_specialty with ON DELETE RESTRICT'; END IF;
+
+    -- ddl-alter-013 drops the historical plural constraint, so it must no longer
+    -- exist anywhere after the full update. This catches a partially applied
+    -- migration in which the new FK was added but the old one was left behind.
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conname = 'fk_professionals_specialty') <> 0
+    THEN RAISE EXCEPTION 'Historical fk_professionals_specialty must be gone after ddl-alter-013'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
         WHERE conrelid = 'professional_management.professional'::regclass AND contype = 'f'
