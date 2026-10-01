@@ -10,11 +10,11 @@ DROP INDEX CONCURRENTLY IF EXISTS professional_management.idx_professional_speci
 DROP INDEX CONCURRENTLY IF EXISTS professional_management.idx_professional_status;
 DROP INDEX CONCURRENTLY IF EXISTS professional_management.idx_idempotency_key_professional_id;
 
-CREATE INDEX idx_professionals_specialty_id
+CREATE INDEX CONCURRENTLY idx_professionals_specialty_id 
     ON professional_management.professional (specialty_id);
 
-CREATE INDEX idx_professionals_status
+CREATE INDEX CONCURRENTLY idx_professionals_status
     ON professional_management.professional (status);
 
-CREATE INDEX idx_idempotency_key_professional_id
+CREATE INDEX CONCURRENTLY idx_idempotency_key_professional_id
     ON professional_management.idempotency_key (professional_id);
