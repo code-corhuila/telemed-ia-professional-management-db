@@ -1,3 +1,11 @@
+-- Locking note: ADD CONSTRAINT ... CHECK without NOT VALID takes an ACCESS
+-- EXCLUSIVE lock and scans every existing row before the transaction commits.
+-- At this stage the domain tables are small and the lock window is on the
+-- order of milliseconds. If the tables grow, split each CHECK into two
+-- changesets: NOT VALID first, then VALIDATE CONSTRAINT in a separate
+-- changeset, so the scan does not block concurrent traffic.
+
+
 -- The standard requires unconstrained text columns with an explicit CHECK of
 -- the maximum length instead of a typed VARCHAR(n). Widening to text is
 -- lossless for every stored value because the current data already satisfies
