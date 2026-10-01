@@ -323,16 +323,29 @@ repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONAR
 Norm 8.2 of the course admits only the types `feat`, `fix`, `docs`,
 `style`, `refactor`, `test`, `chore`, and `perf` in commit messages.
 The early history of this repository contains commits with the types
-`ci(...)` (workflow changes) and `merge(...)` (an integration conflict
-resolved during PR #5). They are recorded here as a known debt.
+`ci(...)` (workflow changes) and one `merge(...)` commit
+(`baeb8b0 merge(develop): resolve PR5 integration conflicts`). They are
+recorded here as a known debt.
 
-They were not corrected because rewriting published history is
-prohibited by norm 9.6: a `git push --force` on a shared branch destroys
-the promotion traces that the standard requires. From this PR onward,
-every new commit uses one of the eight admitted types. The workflow
-changes that would have been `ci(...)` are now committed as
-`chore(...)`, and integration conflicts are resolved without a separate
-merge commit.
+On the `merge(develop)` commit specifically: it was created inside the
+feature branch `chore/professional-db-structure` of PR #5, to bring the
+latest `develop` into that feature branch and resolve conflicts before
+the PR could be merged. It did not merge two permanent branches; norm
+6.2.4 prohibits merging `develop` into `qa` or `qa` into `main`, and
+none of those merges appear anywhere in the history. The violation is
+only in the commit type: `merge` is not in the list of norm 8.2. A
+valid message would have been `chore(merge): resolve PR5 integration
+conflicts` or `chore: resolve PR5 integration conflicts`.
+
+The `ci(...)` commits were not corrected, and the `merge(develop)`
+message was not reworded, because both predate the freeze of develop
+and rewriting published history is prohibited by norm 9.6: a
+`git push --force` on a shared branch destroys the promotion traces
+that the standard requires. From this PR onward, every new commit uses
+one of the eight admitted types. Workflow changes that would have been
+`ci(...)` are now committed as `chore(...)`. Integration conflicts
+inside a feature branch are committed as `chore(merge): ...`, not as
+`merge(...)`.
 
 ## Branching
 
