@@ -1,0 +1,241 @@
+# Data Dictionary — Professional Management
+
+Authoritative data dictionary for the `professional_management` schema.
+Tables, columns, types, constraints, indexes, and their meaning. Derived
+from the Liquibase changesets in this repository; the changesets are the
+source of truth and this document reflects their current state.
+
+**Schema:** `professional_management`
+**Engine:** PostgreSQL 16
+**Liquibase version:** 4.31
+
+---
+
+## Conventions
+
+- Table and column names: singular, `snake_case`.
+- Constraint prefixes: `pk_` (primary key), `fk_` (foreign key), `uq_`
+  (unique), `chk_` (check). Every constraint has an explicit name so a
+  later migration can reference it.
+- Index prefixes: `idx_<table>_<columns>`.
+- Text columns are `text` with an explicit `CHECK (char_length(...) <= n)`
+  where the business fixes a limit; not `VARCHAR(n)`.
+- Money, when present, is stored in minor units as `bigint`; never floating
+  point.
+- No closed value set uses the `ENUM` type; they use `CHECK` or a lookup
+  table.
+
+---
+
+## Table: `professional_management.specialties`
+
+**Purpose:** Catalog of medical specialties administered by Professional
+Management. Reference data used by `professionals.specialty_id`.
+
+| Column | Type | Nullable | Default | Meaning |
+|---|---|---|---|---|
+| `id` | `bigint` (BIGSERIAL) | No | nextval | Primary key. |
+| `name` | `text` | No | — | Specialty name. Unique across the catalog. |
+| `description` | `text` | Yes | — | Optional human-readable description. |
+
+**Constraints:**
+
+| Name | Type | Definition |
+|---|---|---|
+| `pk_specialties` | Primary key | `(id)` |
+| `uq_specialties_name` | Unique | `(name)` |
+| `chk_specialties_name_length` | Check | `char_length(name) <= 100` |
+| `chk_specialties_description_length` | Check | `description IS NULL OR char_length(description) <= 500` |
+
+**Indexes:** none explicit besides the implicit ones created by the primary
+key and the unique constraint.
+
+**Seeded values (initial catalog):** seven specialties inserted by the seed
+changesets `002-seed-specialties` and `004-seed-additional-specialties`:
+Medicina General, Pediatría, Dermatología, Cardiología, Neurología,
+Ginecología, Ortopedia.
+
+---
+
+## Table: `professional_management.professionals`
+
+**Purpose:** Stores a registered healthcare professional profile. One row per
+professional.
+
+| Column | Type | Nullable | Default | Meaning |
+|---|---|---|---|---|
+| `id` | `bigint` (BIGSERIAL) | No | nextval | Primary key. |
+| `identity_user_id` | `bigint` | No | — | External reference to the Identity & Access account. No cross-database foreign key. Unique. |
+| `license_number` | `text` | No | — | Professional license number. Unique. |
+| `specialty_id` | `bigint` | No | — | Foreign key to `specialties.id`. |
+| `years_experience` | `integer` | No | `0` | Years of professional experience. |
+| `professional_type` | `text` | Yes | — | Domain classification. `NULL` during the registration-to-administration transition. |
+| `status` | `text` | No | `'ACTIVE'` | Profile lifecycle status within Professional Management. |
+
+**Constraints:**
+
+| Name | Type | Definition |
+|---|---|---|
+| `pk_professionals` | Primary key | `(id)` |
+| `uq_professionals_identity_user_id` | Unique | `(identity_user_id)` |
+| `uq_professionals_license_number` | Unique | `(license_number)` |
+| `fk_professionals_specialty` | Foreign key | `specialty_id` → `specialties.id` `ON DELETE RESTRICT` |
+| `chk_professionals_years_experience_nonnegative` | Check | `years_experience >= 0` |
+| `chk_professionals_professional_type` | Check | `professional_type IN ('GENERAL_PRACTITIONER','SPECIALIST')` |
+| `chk_professionals_status` | Check | `status IN ('ACTIVE','INACTIVE')` |
+| `chk_professionals_license_number_length` | Check | `char_length(license_number) <= 80` |
+| `chk_professionals_professional_type_length` | Check | `professional_type IS NULL OR char_length(professional_type) <= 30` |
+| `chk_professionals_status_length` | Check | `char_length(status) <= 20` |
+
+**Indexes:**
+
+| Name | Columns | Justification |
+|---|---|---|
+| `idx_professionals_specialty_id` | `(specialty_id)` | Covers the foreign-key column. |
+| `idx_professionals_status` | `(status)` | Filter by lifecycle status. |
+
+**Notes:**
+
+- `identity_user_id` is an external reference to Identity & Access. It is
+  intentionally NOT a foreign key: the referenced data lives in a different
+  database (numeral 7.4 of the standard).
+- `professional_type` is intentionally nullable. Historical professionals
+  are not backfilled; an administrator classifies each profile after
+  registration. The CHECK constraint evaluates NULL as unknown and does not
+  reject unclassified rows.
+- `status` defaults to `ACTIVE` so inserts from the current API contract,
+  which omits the field, remain compatible.
+
+---
+
+## Table: `professional_management.specialty_seed_ownership`
+
+**Purpose:** Tracks which specialty rows were inserted by which seed
+changeset, so that rolling back a seed removes only the rows it created.
+Pre-existing administrator-created rows are preserved across seed rollbacks.
+
+| Column | Type | Nullable | Default | Meaning |
+|---|---|---|---|---|
+| `changeset_id` | `text` | No | — | Identifier of the seeding changeset that created the row. |
+| `specialty_id` | `bigint` | No | — | Reference to the seeded specialty. |
+
+**Constraints:**
+
+| Name | Type | Definition |
+|---|---|---|
+| `pk_specialty_seed_ownership` | Primary key | `(changeset_id, specialty_id)` |
+| `fk_specialty_seed_ownership_specialty` | Foreign key | `specialty_id` → `specialties.id` `ON DELETE CASCADE` |
+
+**Indexes:**
+
+| Name | Columns | Justification |
+|---|---|---|
+| `idx_specialty_seed_ownership_specialty_id` | `(specialty_id)` | Covers the foreign-key column. |
+
+**Notes:** the `ON DELETE CASCADE` on this FK removes only the ownership
+metadata row when an unreferenced specialty is deleted. It does NOT delete
+professionals or specialties.
+
+---
+
+## Table: `professional_management.idempotency_key`
+
+**Purpose:** Stores the `Idempotency-Key` HTTP header for professional
+creation requests. The service writes the professional and its key in the
+same transaction; a repeated key returns the originally created resource
+instead of creating a new one.
+
+| Column | Type | Nullable | Default | Meaning |
+|---|---|---|---|---|
+| `key` | `text` | No | — | The idempotency key from the HTTP request. Primary key. |
+| `professional_id` | `bigint` | No | — | Foreign key to the professional created by this request. |
+| `created_at` | `timestamptz` | No | `now()` | Row creation timestamp. |
+| `request_hash` | `text` | Yes | — | Hash of the request body. Used to detect a retry with the same key but a different payload. |
+
+**Constraints:**
+
+| Name | Type | Definition |
+|---|---|---|
+| `pk_idempotency_key` | Primary key | `(key)` |
+| `fk_idempotency_key_professional` | Foreign key | `professional_id` → `professionals.id` `ON DELETE CASCADE` |
+| `chk_idempotency_key_length` | Check | `char_length(key) BETWEEN 8 AND 128` |
+
+**Indexes:**
+
+| Name | Columns | Justification |
+|---|---|---|
+| `idx_idempotency_key_professional_id` | `(professional_id)` | Covers the foreign-key column. |
+
+**Notes:** the key length (8-128) matches the database standard for
+idempotent HTTP resource creation (Anexo C, numeral 5.3.8).
+
+---
+
+## Schema-level objects
+
+### Schema
+
+- `professional_management` — created by `ddl-schemas-001`. All domain
+  tables live here.
+- `public` — reserved for Liquibase's own bookkeeping tables
+  (`databasechangelog`, `databasechangeloglock`). No domain table lives in
+  `public`. This is the only exception to the rule that nothing lives in
+  `public`.
+
+### Roles
+
+| Role | Login | Membership | Purpose |
+|---|---|---|---|
+| `professional_management_reader` | No (`NOLOGIN`) | — | Read access. USAGE on the schema, SELECT on all tables. |
+| `professional_management_writer` | No (`NOLOGIN`) | Member of `professional_management_reader` | Write access. USAGE on the schema, SELECT/INSERT/UPDATE/DELETE on all tables, USAGE on sequences. |
+
+The infrastructure creates the login users and assigns them to these roles
+using credentials from environment secrets. No password is stored in the
+repository.
+
+### Default privileges
+
+The grants changeset configures `ALTER DEFAULT PRIVILEGES` so tables and
+sequences created in `professional_management` in the future inherit the
+same grants automatically.
+
+---
+
+## Changeset to object mapping
+
+| Changeset ID | Object created or modified |
+|---|---|
+| `ddl-schemas-001` | Schema `professional_management` |
+| `001-create-specialties` | Table `specialties` |
+| `001a-create-specialty-seed-ownership` | Table `specialty_seed_ownership` |
+| `002-seed-specialties` | Seed rows in `specialties` (Medicina General, Pediatría, Dermatología, Cardiología) |
+| `004-seed-additional-specialties` | Seed rows in `specialties` (Neurología, Ginecología, Ortopedia) |
+| `003-create-professionals` | Table `professionals` |
+| `005-cascade-deleted-specialty-ownership` | FK `fk_specialty_seed_ownership_specialty` changed to `ON DELETE CASCADE` |
+| `006-add-professional-type-and-status` | Columns `professional_type`, `status`, their CHECKs, index `idx_professionals_status` |
+| `ddl-alter-007` | Move all domain tables from `public` to `professional_management` |
+| `ddl-alter-008` | Rename CHECK constraints from `ck_*` to `chk_*` |
+| `ddl-tables-004` | Table `idempotency_key` |
+| `ddl-alter-009` | Column `idempotency_key.request_hash` |
+| `ddl-alter-010` | Rename UNIQUE constraints to `uq_*` |
+| `ddl-alter-011` | Convert `VARCHAR(n)` columns to `text` with CHECK length |
+| `ddl-indexes-001` | Index `idx_specialty_seed_ownership_specialty_id` |
+| `001-create-roles` | Roles `professional_management_reader`, `professional_management_writer` |
+| `001-grants` | Schema and table grants; default privileges |
+| `dcl-grants-002` | Explicit grants on `idempotency_key` |
+
+---
+
+## Not in this schema (owned by other domains)
+
+| Data | Owned by |
+|---|---|
+| User credentials, login, tokens | Identity & Access |
+| Appointment availability | Appointment Scheduling |
+| Appointment lifecycle | Appointment Scheduling |
+| Clinical content, consultation notes | Medical / Consultation |
+
+The `professionals.identity_user_id` column holds a reference to data owned
+by Identity & Access. It is stored as a plain `bigint` with a UNIQUE
+constraint and no foreign key, per numeral 7.4 of the standard (integrity
+between domains is enforced by contract, not by the database engine).
