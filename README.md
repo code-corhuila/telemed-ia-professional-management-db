@@ -259,6 +259,27 @@ docker compose -p $debugProject -f docker-compose.test.yml down --volumes --remo
 Remove-Item Env:\TEST_DB_PASSWORD
 ```
 
+## User story traceability
+
+The schema in this repository implements **HU-005 — Professional Management**
+from `telemed-ia-docs`. The mapping between the user story requirements and
+the schema objects is documented below.
+
+| Requirement | Schema object | Changeset |
+|---|---|---|
+| Administer the medical specialty catalog | Table `specialties` | `001-create-specialties` |
+| Initial catalog with seven specialties | Seed rows in `specialties` | `002-seed-specialties`, `004-seed-additional-specialties` |
+| Register healthcare professionals | Table `professionals` | `003-create-professionals` |
+| Classify professionals as general practitioner or specialist | `professional_type` column with CHECK | `006-add-professional-type-and-status` |
+| Professional lifecycle status within Professional Management | `status` column with CHECK | `006-add-professional-type-and-status` |
+| Delete a specialty only when unreferenced | FK `fk_professionals_specialty` `ON DELETE RESTRICT` | `003-create-professionals` |
+| Seed data that can be rolled back without affecting administrator rows | Table `specialty_seed_ownership` | `001a-create-specialty-seed-ownership`, `005-cascade-deleted-specialty-ownership` |
+| Idempotent HTTP creation of professionals | Table `idempotency_key` | `ddl-tables-004` |
+| Detect a retry with the same key but different body | Column `idempotency_key.request_hash` | `ddl-alter-009` |
+
+**Status:** all requirements are implemented in the 18 changesets of this
+repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONARY.md).
+
 ## Branching
 
 Three permanent branches. **None of them accepts a direct commit** — you enter through a child
