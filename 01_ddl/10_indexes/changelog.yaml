@@ -11,3 +11,18 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/10_indexes/001_add_specialty_seed_ownership_index.rollback.sql
             relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-indexes-002
+      author: telemed
+      comment: "Re-create the domain indexes here with CONCURRENTLY and singular names, per Anexo A rules 3 and 14."
+      # CREATE INDEX CONCURRENTLY cannot run inside a transaction block, and the
+      # domain tables already hold the seven seeded specialties.
+      runInTransaction: false
+      changes:
+        - sqlFile:
+            path: 002_recreate_all_indexes_concurrently.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/002_recreate_all_indexes_concurrently.rollback.sql
+            relativeToChangelogFile: true
