@@ -260,6 +260,11 @@ same grants automatically.
 | `ddl-alter-013` | Re-declare `fk_professional_specialty` from `04_alter` on the renamed tables, added `NOT VALID` to avoid an `ACCESS EXCLUSIVE` full-table scan (Anexo A rule 2, norma 5.2.2) |
 | `ddl-alter-014` | `VALIDATE CONSTRAINT fk_professional_specialty` under `SHARE UPDATE EXCLUSIVE`; completes the expand/contract pair |
 | `ddl-indexes-002` | Re-create `idx_professional_specialty_id`, `idx_professional_status` and `idx_idempotency_key_professional_id` in `10_indexes` with `CONCURRENTLY` (Anexo A rules 3 and 14) |
+| `ddl-alter-015` | Recreates fk_specialty_seed_ownership_specialty from 04_alter, added `NOT VALID` so the `ADD` takes only `SHARE UPDATE EXCLUSIVE` instead of an `ACCESS EXCLUSIVE` full-table scan; the preceding `DROP CONSTRAINT` still takes `ACCESS EXCLUSIVE` but only for a catalog update |
+| `ddl-alter-016` | `VALIDATE CONSTRAINT fk_specialty_seed_ownership_specialty` under `SHARE UPDATE EXCLUSIVE`; completes the expand/contract pair |
+| `ddl-alter-017` | Recreates fk_idempotency_key_professional from 04_alter, added `NOT VALID` so the `ADD` takes only `SHARE UPDATE EXCLUSIVE` instead of an `ACCESS EXCLUSIVE` full-table scan; the preceding `DROP CONSTRAINT` still takes `ACCESS EXCLUSIVE` but only for a catalog update |
+| `ddl-alter-018` | `VALIDATE CONSTRAINT fk_idempotency_key_professional` under `SHARE UPDATE EXCLUSIVE`; completes the expand/contract pair |
+| `ddl-indexes-003` | Recreates idx_specialty_seed_ownership_specialty_id with CONCURRENTLY (Anexo A rule 14); between the `DROP` and the `CREATE` the column is briefly unindexed, which is harmless on the seven seeded rows |
 
 ---
 

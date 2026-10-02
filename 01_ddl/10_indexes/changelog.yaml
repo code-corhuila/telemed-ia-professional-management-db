@@ -26,3 +26,20 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/10_indexes/002_recreate_all_indexes_concurrently.rollback.sql
             relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-indexes-003
+      author: telemed
+      comment: "Re-create idx_specialty_seed_ownership_specialty_id with CONCURRENTLY, per Anexo A rule 14."
+      # CREATE INDEX CONCURRENTLY cannot run inside a transaction block, and
+      # specialty_seed_ownership already holds the seven rows inserted by the
+      # seed changesets. The same setting applies to the rollback, which is
+      # declared in the same changeSet block.
+      runInTransaction: false
+      changes:
+        - sqlFile:
+            path: 003_recreate_specialty_seed_ownership_index_concurrently.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/003_recreate_specialty_seed_ownership_index_concurrently.rollback.sql
+            relativeToChangelogFile: true
