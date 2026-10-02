@@ -1,5 +1,8 @@
-# Reserved for future DCL changesets (roles, grants, and policies).
-# This database currently has no DCL objects to manage.
+# DCL family: roles, grants, and policies.
+# This database currently has:
+#   00_roles: 2 NOLOGIN roles (reader, writer).
+#   01_grants: grants for both roles and default privileges.
+#   02_policies: reserved for future row-level security.
 databaseChangeLog:
   - include:
       file: 00_roles/changelog.yaml

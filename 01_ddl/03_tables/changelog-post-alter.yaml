@@ -1,6 +1,12 @@
 databaseChangeLog:
   # Post-alter DDL: creates tables that depend on the domain schema being
-  # populated (professional_management.* tables live there after ddl-alter-007).
+  # populated (professional_management.* tables live there after ddl-alter-007),
+  # then applies the Anexo A schema-conformance migrations.
+  #
+  # ddl-alter-009 alters idempotency_key, so it must run after ddl-tables-004
+  # creates that table. It is registered here, in the changelog fragment that
+  # runs immediately after it, rather than in 04_alter/changelog.yaml, because
+  # that fragment is included BEFORE this one and would fail on a missing table.
   - changeSet:
       id: ddl-tables-004
       author: telemed
@@ -29,3 +35,117 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/04_alter/009_add_request_hash.rollback.sql
             relativeToChangelogFile: true
+  # Schema-conformance migrations.
+  #
+  # ddl-alter-012 and ddl-alter-013 are declared here, and not in
+  # 04_alter/changelog.yaml, because of execution order.
+  # 04_alter/changelog.yaml is included BEFORE 03_tables/changelog-post-alter.yaml,
+  # and ddl-tables-004 above still references the historical table name
+  # professional_management.professionals. Renaming that table from
+  # 04_alter/changelog.yaml would make ddl-tables-004 fail with
+  # 'relation "professional_management.professionals" does not exist'.
+  # Registering them after ddl-tables-004 keeps the whole changelog applicable
+  # from an empty database, which is the cycle the CI rebuild job exercises.
+  # This is the same reasoning already applied to ddl-alter-009.
+  - changeSet:
+      id: ddl-alter-012
+      author: telemed
+      comment: "Rename the domain tables to singular to satisfy Anexo A rule 1."
+      changes:
+        - sqlFile:
+            path: ../04_alter/012_rename_domain_tables_to_singular.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/012_rename_domain_tables_to_singular.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-013
+      author: telemed
+      validCheckSum: 9:29218fac27dc8c37f54c6b65db7428d7
+      comment: "Re-declare fk_professional_specialty from 04_alter to satisfy Anexo A rule 2."
+      changes:
+        - sqlFile:
+            path: ../04_alter/013_recreate_professional_specialty_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/013_recreate_professional_specialty_fk.rollback.sql
+            relativeToChangelogFile: true
+  # ddl-alter-014 is the second half of the ddl-alter-013 FK migration. It must
+  # stay immediately after ddl-alter-013, in this same fragment, because it
+  # validates a constraint on professional_management.professional under its new
+  # singular name. Moving it to 04_alter/changelog.yaml would run it before
+  # ddl-alter-012 renames the table, and VALIDATE CONSTRAINT would fail with
+  # 'constraint "fk_professional_specialty" of relation "professional" does not exist'.
+  - changeSet:
+      id: ddl-alter-014
+      author: telemed
+      comment: "Validate fk_professional_specialty added NOT VALID by ddl-alter-013."
+      changes:
+        - sqlFile:
+            path: ../04_alter/014_validate_professional_specialty_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/014_validate_professional_specialty_fk.rollback.sql
+            relativeToChangelogFile: true
+  # ddl-alter-015 through ddl-alter-018 move the two remaining inline foreign
+  # keys out of their frozen 03_tables declarations. 015 and 016 relocate
+  # fk_specialty_seed_ownership_specialty (declared inline in changeset 001a) and
+  # 017 and 018 relocate fk_idempotency_key_professional (declared inline in
+  # ddl-tables-004), both ON DELETE CASCADE, each split into an ADD CONSTRAINT
+  # NOT VALID plus a separate VALIDATE CONSTRAINT so no ACCESS EXCLUSIVE lock is
+  # ever taken. 015 through 018 follow the same reasoning as 013 and 014: they must
+  # run after ddl-alter-012 has renamed the tables, because both re-added
+  # constraints reference professional_management.specialty and
+  # professional_management.professional under their singular names.
+  - changeSet:
+      id: ddl-alter-015
+      author: telemed
+      comment: "Re-declare fk_specialty_seed_ownership_specialty from 04_alter to satisfy Anexo A rule 2."
+      changes:
+        - sqlFile:
+            path: ../04_alter/015_recreate_specialty_seed_ownership_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/015_recreate_specialty_seed_ownership_fk.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-016
+      author: telemed
+      comment: "Validate fk_specialty_seed_ownership_specialty added NOT VALID by ddl-alter-015."
+      changes:
+        - sqlFile:
+            path: ../04_alter/016_validate_specialty_seed_ownership_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/016_validate_specialty_seed_ownership_fk.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-017
+      author: telemed
+      comment: "Re-declare fk_idempotency_key_professional from 04_alter to satisfy Anexo A rule 2."
+      changes:
+        - sqlFile:
+            path: ../04_alter/017_recreate_idempotency_key_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/017_recreate_idempotency_key_fk.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-018
+      author: telemed
+      comment: "Validate fk_idempotency_key_professional added NOT VALID by ddl-alter-017."
+      changes:
+        - sqlFile:
+            path: ../04_alter/018_validate_idempotency_key_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/018_validate_idempotency_key_fk.rollback.sql
+            relativeToChangelogFile: true
+
