@@ -78,9 +78,11 @@ Four more changesets finish the same alignment without touching any applied chan
 `001a` declared inline, and `ddl-alter-017` does the same for
 `fk_idempotency_key_professional`, which `ddl-tables-004` declared inline. Both now live in
 `04_alter` as Anexo A rule 2 requires, and both keep the `ON DELETE CASCADE` they already
-had. Like `ddl-alter-013`, each is added `NOT VALID` so the change takes only a
-`SHARE UPDATE EXCLUSIVE` lock; `ddl-alter-016` and `ddl-alter-018` then run
-`VALIDATE CONSTRAINT` on them, completing the pair without an `ACCESS EXCLUSIVE` lock.
+had. Like `ddl-alter-013`, each is added `NOT VALID` so the ADD takes only
+`SHARE UPDATE EXCLUSIVE` instead of an `ACCESS EXCLUSIVE` full-table scan. The preceding
+`DROP CONSTRAINT` still takes `ACCESS EXCLUSIVE`, but only for a catalog update.
+`ddl-alter-016` and `ddl-alter-018` then run `VALIDATE CONSTRAINT` on them, completing the
+pair under `SHARE UPDATE EXCLUSIVE`.
 `ddl-indexes-003` re-creates `idx_specialty_seed_ownership_specialty_id` with
 `CREATE INDEX CONCURRENTLY`, because `ddl-indexes-001` built it without `CONCURRENTLY` on a
 table that the seeds had already populated (Anexo A rule 14); it is registered with
