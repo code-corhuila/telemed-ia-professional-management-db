@@ -49,6 +49,16 @@ jobs:
           TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
         run: docker compose -f docker-compose.test.yml run --rm liquibase update
 
+      - name: Record fresh changeset count
+        id: fresh_count
+        env:
+          TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
+        run: |
+          count=$(docker compose -f docker-compose.test.yml exec -T postgres \
+            psql -U "$TEST_DB_USER" -d professional_management_test -tAc \
+            "SELECT count(*) FROM databasechangelog")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
       - name: Liquibase update (must apply zero changesets)
         env:
           TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
@@ -63,6 +73,23 @@ jobs:
           echo "Changesets before: $before, after: $after"
           [ "$before" = "$after" ] \
             || { echo "Second update added changesets" >&2; exit 1; }
+
+      - name: Verify expected changeset count
+        env:
+          TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
+        run: |
+          expected=27
+          reported="${{ steps.fresh_count.outputs.count }}"
+          if [ "$reported" != "$expected" ]; then
+            echo "Expected $expected changesets in databasechangelog, got $reported" >&2
+            exit 1
+          fi
+          echo "Fresh update applied exactly $expected changesets."
+
+      - name: Liquibase validate
+        env:
+          TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
+        run: docker compose -f docker-compose.test.yml run --rm liquibase validate
 
       - name: Liquibase rollback (all)
         # 999 is a temporary sentinel meaning "all". It will be replaced by a
