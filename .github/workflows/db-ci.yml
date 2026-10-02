@@ -45,18 +45,17 @@ jobs:
           exit 1
 
       - name: Liquibase update (fresh)
-        env:
-          TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
-        run: docker compose -f docker-compose.test.yml run --rm liquibase update
-
-      - name: Record fresh changeset count
-        id: fresh_count
+        id: fresh_update
         env:
           TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
         run: |
-          count=$(docker compose -f docker-compose.test.yml exec -T postgres \
-            psql -U "$TEST_DB_USER" -d professional_management_test -tAc \
-            "SELECT count(*) FROM databasechangelog")
+          output=$(docker compose -f docker-compose.test.yml run --rm liquibase update 2>&1)
+          echo "$output"
+          count=$(echo "$output" | grep -E '^Run:\s+[0-9]+' | awk '{print $2}')
+          if [ -z "$count" ]; then
+            echo "Liquibase update did not report its changeset count." >&2
+            exit 1
+          fi
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
       - name: Liquibase update (must apply zero changesets)
@@ -78,10 +77,10 @@ jobs:
         env:
           TEST_DB_PASSWORD: ${{ steps.db_password.outputs.password }}
         run: |
-          expected=27
-          reported="${{ steps.fresh_count.outputs.count }}"
+          expected=$(cat changelog/expected-count.txt | tr -d '[:space:]')
+          reported="${{ steps.fresh_update.outputs.count }}"
           if [ "$reported" != "$expected" ]; then
-            echo "Expected $expected changesets in databasechangelog, got $reported" >&2
+            echo "Expected $expected changesets from changelog/expected-count.txt, got $reported" >&2
             exit 1
           fi
           echo "Fresh update applied exactly $expected changesets."
