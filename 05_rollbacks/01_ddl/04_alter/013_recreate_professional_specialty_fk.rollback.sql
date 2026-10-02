@@ -4,7 +4,7 @@
 -- ddl-alter-013 leaves the schema in the state that ddl-alter-012
 -- expects.
 ALTER TABLE professional_management.professional
-    DROP CONSTRAINT fk_professional_specialty;
+    DROP CONSTRAINT IF EXISTS fk_professional_specialty;
 ALTER TABLE professional_management.professional
     ADD CONSTRAINT fk_professionals_specialty
     FOREIGN KEY (specialty_id)

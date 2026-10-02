@@ -62,6 +62,7 @@ databaseChangeLog:
   - changeSet:
       id: ddl-alter-013
       author: telemed
+      validCheckSum: 9:29218fac27dc8c37f54c6b65db7428d7
       comment: "Re-declare fk_professional_specialty from 04_alter to satisfy Anexo A rule 2."
       changes:
         - sqlFile:

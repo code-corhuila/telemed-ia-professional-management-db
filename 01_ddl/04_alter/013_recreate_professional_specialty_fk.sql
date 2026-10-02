@@ -19,8 +19,13 @@
 -- ON DELETE RESTRICT is preserved: deleting a specialty that a
 -- professional references must still be rejected, and must never cascade
 -- to professionals.
+--
+-- The DROP uses IF EXISTS so the changeset is safe to retry. If the
+-- changeset fails after the DROP and before the ADD commits, the
+-- retry finds no constraint to drop and proceeds without error.
+-- Same pattern as 015 and 017.
 ALTER TABLE professional_management.professional
-    DROP CONSTRAINT fk_professionals_specialty;
+    DROP CONSTRAINT IF EXISTS fk_professionals_specialty;
 ALTER TABLE professional_management.professional
     ADD CONSTRAINT fk_professional_specialty
     FOREIGN KEY (specialty_id)
