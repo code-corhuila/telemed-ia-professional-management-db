@@ -1,3 +1,10 @@
+# Test fixture — NOT the production domain compose.
+# The domain compose lives at deploy/compose.yml and follows Anexo J
+# (no local Postgres; the executor points at the shared instance in
+# telemed-ia-infra-postgres).
+# This file spins up an ephemeral Postgres ONLY for the isolated test
+# runner (schema tests, rollback tests, seed tests). It is never used
+# for development or deployment.
 services:
   postgres:
     image: postgres:16-alpine
