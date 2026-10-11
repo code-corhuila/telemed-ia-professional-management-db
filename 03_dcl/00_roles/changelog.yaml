@@ -2,9 +2,10 @@ databaseChangeLog:
   - changeSet:
       id: 001-create-roles
       author: telemed
-      validCheckSum: ANY
+      validCheckSum:
+        - "9:99c225650afb91f7ed5093c48b561217"
       labels: "HU-005,dcl,roles"
-      comment: "Create non-login roles for the professional_management schema. Idempotent: if telemed-ia-infra-postgres has already created them, the DO block is a no-op and only the nested grant between reader and writer runs."
+      comment: "Create non-login roles for the professional_management schema. Idempotent: if telemed-ia-infra-postgres has already created them, the DO block is a no-op and only the nested grant between reader and writer runs. validCheckSum pins the pre-PR-26 checksum (9:99c225650afb91f7ed5093c48b561217) so the changeset already applied in qa remains valid after the SQL was made idempotent; do not use ANY."
       changes:
         - sqlFile:
             path: 001_create_roles.sql
