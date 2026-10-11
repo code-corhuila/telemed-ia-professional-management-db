@@ -38,3 +38,5 @@ services:
       LIQUIBASE_COMMAND_USERNAME: ${TEST_DB_USER:?TEST_DB_USER must be set}
       LIQUIBASE_COMMAND_PASSWORD: ${TEST_DB_PASSWORD:?TEST_DB_PASSWORD must be set}
       LIQUIBASE_COMMAND_CHANGELOG_FILE: changelog/changelog-master.yaml
+      LIQUIBASE_DATABASE_CHANGELOG_TABLE_NAME: databasechangelog_professional_management
+      LIQUIBASE_DATABASE_CHANGELOG_LOCK_TABLE_NAME: databasechangeloglock_professional_management
