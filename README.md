@@ -152,9 +152,35 @@ rows, while legacy rows remain unowned and are preserved because historical owne
 inferred. Legacy seed rollback removes Liquibase history but preserves unowned rows; a complete
 rollback drops the catalog when changeset 001 removes the specialty table.
 
-The deployment configuration is [`deploy/compose.yml`](deploy/compose.yml). Copy `.env.example`
-to `.env` and set the database name, user, password, and optional port before starting; `.env` is
-ignored by Git.
+## Running migrations
+
+Per Anexo J, this repository does not own a PostgreSQL instance. The single shared instance lives
+in `telemed-ia-infra-postgres`.
+
+Make sure both repositories are cloned as siblings:
+
+```text
+workspace/
+├── telemed-ia-infra-postgres/
+└── telemed-ia-professional-management-db/
+```
+
+From `telemed-ia-infra-postgres`, apply this domain's migrations with:
+
+```sh
+docker compose --env-file env/dev.env --profile tooling \
+  run --rm professional-management-db-migrate
+```
+
+The executor uses its own Liquibase control tables,
+`databasechangelog_professional_management` and
+`databasechangeloglock_professional_management`, so its migration history does not collide with
+other domains that share the instance.
+
+### Local tests
+
+`docker-compose.test.yml` is a test fixture. It starts an ephemeral PostgreSQL instance only for
+isolated schema, rollback, and seed tests; it is not used for development or deployment.
 
 ## Repository structure alignment
 
@@ -382,3 +408,28 @@ branch into another: `merge develop -> qa` and `merge qa -> main` do not exist i
 rule.
 
 Full policy: `00-governance/branching-policy.md` in `telemed-ia-docs`.
+
+## Recovery — if this PR lands before the infra counterpart
+
+This repository's `deploy/compose.yml` no longer starts its own
+Postgres. It relies on the shared instance at
+`telemed-ia-infra-postgres`, which must already have the
+`professional_management` role, schema and grants in
+`postgres/init/01-instance.sh` (companion PR on that repository).
+
+If you pull `develop` and find that
+`docker compose --profile tooling run --rm professional-management-db-migrate`
+fails because the shared instance does not yet have those objects,
+you have two options:
+
+1. Wait for the infra PR to be merged. It is the intended state and
+   the fastest path. No local action is needed.
+
+2. Temporarily restore a local Postgres for your own work. Do this
+   on a throwaway branch, never on `develop`:
+       git fetch origin
+       git checkout -b tmp/restore-local-postgres origin/develop~1
+   That checks out the previous commit, which still has the local
+   Postgres service. Do not push that branch.
+
+Once the infra PR is merged, this section can be deleted.
