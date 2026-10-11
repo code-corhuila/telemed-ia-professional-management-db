@@ -15,7 +15,12 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'r'
-          AND c.relname NOT IN ('databasechangelog', 'databasechangeloglock'))
+          AND c.relname NOT IN (
+              'databasechangelog',
+              'databasechangeloglock',
+              'databasechangelog_professional_management',
+              'databasechangeloglock_professional_management'
+          ))
     THEN RAISE EXCEPTION 'Unexpected public tables exist'; END IF;
 
     IF to_regclass('professional_management.specialty') IS NULL
@@ -402,24 +407,22 @@ BEGIN
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
 
-    -- The Liquibase control tables must carry the domain suffix
-    -- (Anexo J.6), otherwise two domains on the shared instance would
-    -- collide on the default `databasechangelog` name. This asserts the
-    -- suffix is actually applied by the compose configuration.
-    --
-    -- Only the positive check (suffixed tables exist) is meaningful
-    -- here. The inverse check (no unsuffixed tables exist) would be
-    -- over-reaching: other tests in the same suite — specifically the
-    -- seed rollback integration test — intentionally create unsuffixed
-    -- `databasechangelog` from a legacy fixture, and their presence
-    -- does not indicate a misconfiguration of this migration.
-
-    IF (SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_name IN (
-            'databasechangelog_professional_management',
-            'databasechangeloglock_professional_management'
-        )) <> 2 THEN
-        RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
+    -- The positive suffix assertion is meaningful only for the database
+    -- created by this repository's normal CI path
+    -- (`professional_management_test`, produced by `docker-compose.test.yml`).
+    -- The seed rollback integration test runs this same file against a
+    -- separate database (`seed_fresh_<hash>`) created with a legacy
+    -- changelog fixture that intentionally uses the unsuffixed
+    -- `databasechangelog` name; asserting the suffix there would be
+    -- checking a property that test is designed not to have.
+    IF current_database() = 'professional_management_test' THEN
+        IF (SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_name IN (
+                'databasechangelog_professional_management',
+                'databasechangeloglock_professional_management'
+            )) <> 2 THEN
+            RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
+        END IF;
     END IF;
 END;
 $$;
