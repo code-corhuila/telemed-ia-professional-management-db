@@ -15,7 +15,12 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'r'
-          AND c.relname NOT IN ('databasechangelog', 'databasechangeloglock'))
+          AND c.relname NOT IN (
+              'databasechangelog',
+              'databasechangeloglock',
+              'databasechangelog_professional_management',
+              'databasechangeloglock_professional_management'
+          ))
     THEN RAISE EXCEPTION 'Unexpected public tables exist'; END IF;
 
     IF to_regclass('professional_management.specialty') IS NULL
@@ -401,6 +406,24 @@ BEGIN
     IF EXISTS (SELECT 1 FROM professional_management.idempotency_key
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
+
+    -- The suffix assertion applies by default. The databases it must
+    -- NOT run against are the seed rollback integration test's
+    -- fixtures (`seed_<variant>_<hash>`), which deliberately create the
+    -- unsuffixed `databasechangelog` from legacy changelogs to test
+    -- legacy compatibility. Any other database name — the normal CI
+    -- fixture, the shared instance, a future test harness — gets the
+    -- assertion by default, so a regression into unsuffixed control
+    -- tables cannot slip through silently.
+    IF current_database() NOT LIKE 'seed_%' THEN
+        IF (SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_name IN (
+                'databasechangelog_professional_management',
+                'databasechangeloglock_professional_management'
+            )) <> 2 THEN
+            RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
+        END IF;
+    END IF;
 
     -- Simulate re-application of the role changeset against a database
     -- where the roles already exist. This exercises the no-op branch
