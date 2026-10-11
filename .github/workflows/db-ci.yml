@@ -64,11 +64,11 @@ jobs:
         run: |
           before=$(docker compose -f docker-compose.test.yml exec -T postgres \
             psql -U "$TEST_DB_USER" -d professional_management_test -tAc \
-            "SELECT count(*) FROM databasechangelog")
+            "SELECT count(*) FROM databasechangelog_professional_management")
           docker compose -f docker-compose.test.yml run --rm liquibase update
           after=$(docker compose -f docker-compose.test.yml exec -T postgres \
             psql -U "$TEST_DB_USER" -d professional_management_test -tAc \
-            "SELECT count(*) FROM databasechangelog")
+            "SELECT count(*) FROM databasechangelog_professional_management")
           echo "Changesets before: $before, after: $after"
           [ "$before" = "$after" ] \
             || { echo "Second update added changesets" >&2; exit 1; }
@@ -106,7 +106,7 @@ jobs:
             "SELECT count(*) FROM information_schema.tables \
              WHERE table_schema NOT IN ('pg_catalog','information_schema') \
              AND table_type='BASE TABLE' \
-             AND table_name NOT IN ('databasechangelog','databasechangeloglock')")
+             AND table_name NOT IN ('databasechangelog_professional_management','databasechangeloglock_professional_management')")
           echo "Domain tables remaining: $count"
           [ "$count" = "0" ] || { echo "Domain tables remain after rollback" >&2; exit 1; }
 
