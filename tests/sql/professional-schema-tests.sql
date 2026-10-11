@@ -407,15 +407,15 @@ BEGIN
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
 
-    -- The suffix assertion applies by default. The only database it must
-    -- NOT run against is the seed rollback integration test's fixture
-    -- (`seed_fresh_<hash>`), which deliberately creates the unsuffixed
-    -- `databasechangelog` from a legacy changelog to test legacy
-    -- compatibility. Any other database name — a future rename of the
-    -- normal CI fixture, a new test harness, the shared instance — gets
-    -- the assertion by default, so a regression into unsuffixed control
+    -- The suffix assertion applies by default. The databases it must
+    -- NOT run against are the seed rollback integration test's
+    -- fixtures (`seed_<variant>_<hash>`), which deliberately create the
+    -- unsuffixed `databasechangelog` from legacy changelogs to test
+    -- legacy compatibility. Any other database name — the normal CI
+    -- fixture, the shared instance, a future test harness — gets the
+    -- assertion by default, so a regression into unsuffixed control
     -- tables cannot slip through silently.
-    IF current_database() NOT LIKE 'seed_fresh_%' THEN
+    IF current_database() NOT LIKE 'seed_%' THEN
         IF (SELECT COUNT(*) FROM information_schema.tables
             WHERE table_name IN (
                 'databasechangelog_professional_management',
