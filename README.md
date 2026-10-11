@@ -408,3 +408,28 @@ branch into another: `merge develop -> qa` and `merge qa -> main` do not exist i
 rule.
 
 Full policy: `00-governance/branching-policy.md` in `telemed-ia-docs`.
+
+## Recovery — if this PR lands before the infra counterpart
+
+This repository's `deploy/compose.yml` no longer starts its own
+Postgres. It relies on the shared instance at
+`telemed-ia-infra-postgres`, which must already have the
+`professional_management` role, schema and grants in
+`postgres/init/01-instance.sh` (companion PR on that repository).
+
+If you pull `develop` and find that
+`docker compose --profile tooling run --rm professional-management-db-migrate`
+fails because the shared instance does not yet have those objects,
+you have two options:
+
+1. Wait for the infra PR to be merged. It is the intended state and
+   the fastest path. No local action is needed.
+
+2. Temporarily restore a local Postgres for your own work. Do this
+   on a throwaway branch, never on `develop`:
+       git fetch origin
+       git checkout -b tmp/restore-local-postgres origin/develop~1
+   That checks out the previous commit, which still has the local
+   Postgres service. Do not push that branch.
+
+Once the infra PR is merged, this section can be deleted.
