@@ -1,3 +1,10 @@
+-- CANONICAL DEFINITION
+-- The canonical definition of these roles lives in
+-- telemed-ia-infra-postgres/postgres/init/01-instance.sh. This block is
+-- a fallback for the ephemeral CI database only. Any change to role
+-- attributes (CONNECTION LIMIT, VALID UNTIL, password policy) must be
+-- made in the infra file first, then mirrored here.
+
 -- -------------------------------------------------------------------------
 -- Non-login roles for the professional_management domain.
 --
