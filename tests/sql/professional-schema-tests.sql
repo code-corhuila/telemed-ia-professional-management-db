@@ -407,15 +407,15 @@ BEGIN
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
 
-    -- The positive suffix assertion is meaningful only for the database
-    -- created by this repository's normal CI path
-    -- (`professional_management_test`, produced by `docker-compose.test.yml`).
-    -- The seed rollback integration test runs this same file against a
-    -- separate database (`seed_fresh_<hash>`) created with a legacy
-    -- changelog fixture that intentionally uses the unsuffixed
-    -- `databasechangelog` name; asserting the suffix there would be
-    -- checking a property that test is designed not to have.
-    IF current_database() = 'professional_management_test' THEN
+    -- The suffix assertion applies by default. The only database it must
+    -- NOT run against is the seed rollback integration test's fixture
+    -- (`seed_fresh_<hash>`), which deliberately creates the unsuffixed
+    -- `databasechangelog` from a legacy changelog to test legacy
+    -- compatibility. Any other database name — a future rename of the
+    -- normal CI fixture, a new test harness, the shared instance — gets
+    -- the assertion by default, so a regression into unsuffixed control
+    -- tables cannot slip through silently.
+    IF current_database() NOT LIKE 'seed_fresh_%' THEN
         IF (SELECT COUNT(*) FROM information_schema.tables
             WHERE table_name IN (
                 'databasechangelog_professional_management',
