@@ -454,6 +454,15 @@ BEGIN
     -- `databasechangelog` name; asserting the suffix there would be
     -- checking a property that test is designed not to have.
     IF current_database() = 'professional_management_test' THEN
+    -- The suffix assertion applies by default. The only database it must
+    -- NOT run against is the seed rollback integration test's fixture
+    -- (`seed_fresh_<hash>`), which deliberately creates the unsuffixed
+    -- `databasechangelog` from a legacy changelog to test legacy
+    -- compatibility. Any other database name — a future rename of the
+    -- normal CI fixture, a new test harness, the shared instance — gets
+    -- the assertion by default, so a regression into unsuffixed control
+    -- tables cannot slip through silently.
+    IF current_database() NOT LIKE 'seed_fresh_%' THEN
         IF (SELECT COUNT(*) FROM information_schema.tables
             WHERE table_name IN (
                 'databasechangelog_professional_management',
