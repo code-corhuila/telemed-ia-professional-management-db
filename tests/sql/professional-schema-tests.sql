@@ -401,6 +401,28 @@ BEGIN
     IF EXISTS (SELECT 1 FROM professional_management.idempotency_key
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
+
+    -- The Liquibase control tables must carry the domain suffix
+    -- (Anexo J.6), otherwise two domains on the shared instance would
+    -- collide on the default `databasechangelog` name. This asserts the
+    -- suffix is actually applied by the compose configuration; the
+    -- coexistence test (two domains on the same instance) lives in the
+    -- infra repository, where the shared instance is assembled.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN ('databasechangelog', 'databasechangeloglock')
+    ) THEN
+        RAISE EXCEPTION 'Liquibase control tables must not use the default (unsuffixed) name';
+    END IF;
+
+    IF (SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_name IN (
+            'databasechangelog_professional_management',
+            'databasechangeloglock_professional_management'
+        )) <> 2 THEN
+        RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
+    END IF;
 END;
 $$;
 
