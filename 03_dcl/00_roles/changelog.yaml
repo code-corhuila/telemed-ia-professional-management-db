@@ -2,12 +2,16 @@ databaseChangeLog:
   - changeSet:
       id: 001-create-roles
       author: telemed
-      comment: "Create non-login roles for Professional Management database access."
+      validCheckSum: ANY
+      labels: "HU-005,dcl,roles"
+      comment: "Create non-login roles for the professional_management schema. Idempotent: if telemed-ia-infra-postgres has already created them, the DO block is a no-op and only the nested grant between reader and writer runs."
       changes:
         - sqlFile:
             path: 001_create_roles.sql
             relativeToChangelogFile: true
+            splitStatements: false
       rollback:
         - sqlFile:
             path: ../../05_rollbacks/03_dcl/00_roles/001_create_roles.rollback.sql
             relativeToChangelogFile: true
+            splitStatements: false
