@@ -4,17 +4,16 @@
 -- The forward changeset is idempotent: if infra has already created
 -- the roles, the DO block is a no-op. This rollback must be symmetric:
 -- on the shared instance the roles are owned by infra and used by
--- professional_management_app, so they must not be dropped. On the
--- ephemeral CI database there is no other member, so the drop still
--- happens and the CI rebuild path remains clean.
+-- professional_management_app, so neither the nested grant nor the
+-- roles themselves may be touched. On the ephemeral CI database there
+-- is no other member, so both the REVOKE and the DROP still happen and
+-- the CI rebuild path remains clean.
 --
 -- Detection: a role with no members in pg_auth_members other than the
 -- nested reader->writer pair is treated as "owned by this changeset"
--- and can be safely dropped. If infra owns it, professional_management_app
--- or another role appears as a member and the DROP is skipped.
+-- and can be safely unwound. If infra owns it, professional_management_app
+-- or another role appears as a member and nothing is touched.
 -- -------------------------------------------------------------------------
-
-REVOKE professional_management_reader FROM professional_management_writer;
 
 DO $$
 DECLARE
@@ -38,6 +37,7 @@ BEGIN
     ) INTO writer_has_external_members;
 
     IF NOT reader_has_external_members AND NOT writer_has_external_members THEN
+        REVOKE professional_management_reader FROM professional_management_writer;
         DROP ROLE IF EXISTS professional_management_writer;
         DROP ROLE IF EXISTS professional_management_reader;
     END IF;
