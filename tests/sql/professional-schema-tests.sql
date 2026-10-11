@@ -401,6 +401,28 @@ BEGIN
     IF EXISTS (SELECT 1 FROM professional_management.idempotency_key
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
+
+    -- Simulate re-application of the role changeset against a database
+    -- where the roles already exist. This exercises the no-op branch
+    -- of the idempotent DO block added in PR #26.
+    DO $inner$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader') THEN
+            CREATE ROLE professional_management_reader NOLOGIN;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_writer') THEN
+            CREATE ROLE professional_management_writer NOLOGIN;
+        END IF;
+    END
+    $inner$;
+
+    -- Both roles must still exist after the second application.
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader') THEN
+        RAISE EXCEPTION 'reader role was dropped during re-application';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_writer') THEN
+        RAISE EXCEPTION 'writer role was dropped during re-application';
+    END IF;
 END;
 $$;
 
