@@ -407,6 +407,24 @@ BEGIN
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
 
+    -- The suffix assertion applies by default. The databases it must
+    -- NOT run against are the seed rollback integration test's
+    -- fixtures (`seed_<variant>_<hash>`), which deliberately create the
+    -- unsuffixed `databasechangelog` from legacy changelogs to test
+    -- legacy compatibility. Any other database name — the normal CI
+    -- fixture, the shared instance, a future test harness — gets the
+    -- assertion by default, so a regression into unsuffixed control
+    -- tables cannot slip through silently.
+    IF current_database() NOT LIKE 'seed_%' THEN
+        IF (SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_name IN (
+                'databasechangelog_professional_management',
+                'databasechangeloglock_professional_management'
+            )) <> 2 THEN
+            RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
+        END IF;
+    END IF;
+
     -- Simulate re-application of the role changeset against a database
     -- where the roles already exist. This exercises the no-op branch
     -- of the idempotent DO block added in PR #26.
@@ -427,56 +445,6 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_writer') THEN
         RAISE EXCEPTION 'writer role was dropped during re-application';
-    -- The Liquibase control tables must carry the domain suffix
-    -- (Anexo J.6), otherwise two domains on the shared instance would
-    -- collide on the default `databasechangelog` name. This asserts the
-    -- suffix is actually applied by the compose configuration.
-    --
-    -- Only the positive check (suffixed tables exist) is meaningful
-    -- here. The inverse check (no unsuffixed tables exist) would be
-    -- over-reaching: other tests in the same suite — specifically the
-    -- seed rollback integration test — intentionally create unsuffixed
-    -- `databasechangelog` from a legacy fixture, and their presence
-    -- does not indicate a misconfiguration of this migration.
-
-    IF (SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_name IN (
-            'databasechangelog_professional_management',
-            'databasechangeloglock_professional_management'
-        )) <> 2 THEN
-        RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
-    -- The positive suffix assertion is meaningful only for the database
-    -- created by this repository's normal CI path
-    -- (`professional_management_test`, produced by `docker-compose.test.yml`).
-    -- The seed rollback integration test runs this same file against a
-    -- separate database (`seed_fresh_<hash>`) created with a legacy
-    -- changelog fixture that intentionally uses the unsuffixed
-    -- `databasechangelog` name; asserting the suffix there would be
-    -- checking a property that test is designed not to have.
-    IF current_database() = 'professional_management_test' THEN
-    -- The suffix assertion applies by default. The only database it must
-    -- NOT run against is the seed rollback integration test's fixture
-    -- (`seed_fresh_<hash>`), which deliberately creates the unsuffixed
-    -- `databasechangelog` from a legacy changelog to test legacy
-    -- compatibility. Any other database name — a future rename of the
-    -- normal CI fixture, a new test harness, the shared instance — gets
-    -- the assertion by default, so a regression into unsuffixed control
-    -- The suffix assertion applies by default. The databases it must
-    -- NOT run against are the seed rollback integration test's
-    -- fixtures (`seed_<variant>_<hash>`), which deliberately create the
-    -- unsuffixed `databasechangelog` from legacy changelogs to test
-    -- legacy compatibility. Any other database name — the normal CI
-    -- fixture, the shared instance, a future test harness — gets the
-    -- assertion by default, so a regression into unsuffixed control
-    -- tables cannot slip through silently.
-    IF current_database() NOT LIKE 'seed_%' THEN
-        IF (SELECT COUNT(*) FROM information_schema.tables
-            WHERE table_name IN (
-                'databasechangelog_professional_management',
-                'databasechangeloglock_professional_management'
-            )) <> 2 THEN
-            RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
-        END IF;
     END IF;
 
     -- Exercise the membership-detection query used by the rollback of
