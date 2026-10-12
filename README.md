@@ -197,11 +197,28 @@ This keeps reverse-order rollback safe with the restrictive foreign key from
 
 ### Rollback layout
 
-Rollbacks for **new** changesets live as external files under `05_rollbacks/`,
-mirroring the migration families. Historical changesets `001` through `006`
-were applied before this layout existed and keep their inline `--rollback`
-blocks; editing them would change their Liquibase checksum and break every
-environment that has applied them (database standard, rule 12).
+Every changeset in this repository declares its reversal. Twenty
+changesets use an external `.rollback.sql` file under `05_rollbacks/`,
+mirroring the migration families. Seven formatted-SQL changesets
+(`001-create-specialties`, `001a-create-specialty-seed-ownership`,
+`002-seed-specialties`, `003-create-professionals`,
+`004-seed-additional-specialties`,
+`005-cascade-deleted-specialty-ownership` and
+`006-add-professional-type-and-status`) declare their reversal inline
+with `--rollback` lines, and also carry an external mirror under
+`05_rollbacks/` for the same layout as every other changeset.
+
+The inline declaration is what Liquibase executes at rollback time.
+The external file is the mirror required by the Anexo A layout. The
+two are kept in sync: if a future change to a formatted-SQL changeset's
+reversal is needed, the mirror and the inline block must both be
+updated, and the changeset's `validCheckSum` must be extended to accept
+the new body (rule 12 prohibits editing an applied changeset without
+that coordination).
+
+New changesets whose reversal cannot be expressed inline (conditional
+logic across tables, restoration from an external source) use the YAML
+changeSet form with an external file under `05_rollbacks/`.
 
 See [`05_rollbacks/README.md`](05_rollbacks/README.md) for details.
 
