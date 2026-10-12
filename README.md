@@ -197,28 +197,28 @@ This keeps reverse-order rollback safe with the restrictive foreign key from
 
 ### Rollback layout
 
-Rollbacks for **new** changesets live as external files under `05_rollbacks/`,
-mirroring the migration families. Seven historical changesets — `001-create-specialties`,
-`001a-create-specialty-seed-ownership`, `002-seed-specialties`,
-`003-create-professionals`, `004-seed-additional-specialties`,
+Every changeset in this repository declares its reversal. Twenty
+changesets use an external `.rollback.sql` file under `05_rollbacks/`,
+mirroring the migration families. Seven formatted-SQL changesets
+(`001-create-specialties`, `001a-create-specialty-seed-ownership`,
+`002-seed-specialties`, `003-create-professionals`,
+`004-seed-additional-specialties`,
 `005-cascade-deleted-specialty-ownership` and
-`006-add-professional-type-and-status` — were applied before this layout
-existed and keep their `--rollback` blocks inline inside their own `.sql`
-files.
+`006-add-professional-type-and-status`) declare their reversal inline
+with `--rollback` lines, and also carry an external mirror under
+`05_rollbacks/` for the same layout as every other changeset.
 
-Per Anexo A, the external-file requirement applies to migrations that
-reverse with a file (`espejo de cada migración que revierte con un
-archivo`). These seven reverse inline, so the standard is satisfied by
-their inline blocks. Editing them to add external rollbacks would change
-their Liquibase checksum and break every environment that has already
-applied them (rule 12, "un changeset aplicado nunca se edita"). Their
-inline rollback is the traceable, applied reversal.
+The inline declaration is what Liquibase executes at rollback time.
+The external file is the mirror required by the Anexo A layout. The
+two are kept in sync: if a future change to a formatted-SQL changeset's
+reversal is needed, the mirror and the inline block must both be
+updated, and the changeset's `validCheckSum` must be extended to accept
+the new body (rule 12 prohibits editing an applied changeset without
+that coordination).
 
-If a future changeset needs a rollback that cannot be expressed inline
-(conditional logic across tables, data restoration from an external
-source), it declares its rollback through the YAML changeSet form and
-places the file under `05_rollbacks/`, which is the pattern used by the
-other twenty changesets.
+New changesets whose reversal cannot be expressed inline (conditional
+logic across tables, restoration from an external source) use the YAML
+changeSet form with an external file under `05_rollbacks/`.
 
 See [`05_rollbacks/README.md`](05_rollbacks/README.md) for details.
 
