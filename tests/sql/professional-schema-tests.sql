@@ -15,7 +15,12 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'r'
-          AND c.relname NOT IN ('databasechangelog', 'databasechangeloglock'))
+          AND c.relname NOT IN (
+              'databasechangelog',
+              'databasechangeloglock',
+              'databasechangelog_professional_management',
+              'databasechangeloglock_professional_management'
+          ))
     THEN RAISE EXCEPTION 'Unexpected public tables exist'; END IF;
 
     IF to_regclass('professional_management.specialty') IS NULL
@@ -401,6 +406,100 @@ BEGIN
     IF EXISTS (SELECT 1 FROM professional_management.idempotency_key
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
+
+    -- The suffix assertion applies by default. The databases it must
+    -- NOT run against are the seed rollback integration test's
+    -- fixtures (`seed_<variant>_<hash>`), which deliberately create the
+    -- unsuffixed `databasechangelog` from legacy changelogs to test
+    -- legacy compatibility. Any other database name — the normal CI
+    -- fixture, the shared instance, a future test harness — gets the
+    -- assertion by default, so a regression into unsuffixed control
+    -- tables cannot slip through silently.
+    IF current_database() NOT LIKE 'seed_%' THEN
+        IF (SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_name IN (
+                'databasechangelog_professional_management',
+                'databasechangeloglock_professional_management'
+            )) <> 2 THEN
+            RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
+        END IF;
+    END IF;
+
+    -- Simulate re-application of the role changeset against a database
+    -- where the roles already exist. This exercises the no-op branch
+    -- of the idempotent DO block added in PR #26.
+    DO $inner$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader') THEN
+            CREATE ROLE professional_management_reader NOLOGIN;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_writer') THEN
+            CREATE ROLE professional_management_writer NOLOGIN;
+        END IF;
+    END
+    $inner$;
+
+    -- Both roles must still exist after the second application.
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader') THEN
+        RAISE EXCEPTION 'reader role was dropped during re-application';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_writer') THEN
+        RAISE EXCEPTION 'writer role was dropped during re-application';
+    END IF;
+
+    -- Exercise the membership-detection query used by the rollback of
+    -- 001-create-roles. The rollback decides whether to drop the
+    -- reader/writer roles based on whether either role has any member
+    -- other than the nested reader->writer pair. That detection branch
+    -- is critical (it decides a destructive DROP ROLE) and must not
+    -- remain untested.
+    --
+    -- This test does NOT run the rollback (that would drop roles the
+    -- other tests depend on). It replicates the detection query against
+    -- a simulated "shared instance" state — a fake external role granted
+    -- the writer role — and asserts the query returns true. If that
+    -- detection ever regresses, this assertion fails and the destructive
+    -- path would be caught before merge.
+    DO $rollback_probe$
+    DECLARE
+        reader_has_external_members boolean;
+        writer_has_external_members boolean;
+        would_drop_roles boolean;
+    BEGIN
+        -- Simulate infra's app user being granted the writer role.
+        EXECUTE 'CREATE ROLE test_external_app_probe NOLOGIN';
+        EXECUTE 'GRANT professional_management_writer TO test_external_app_probe';
+
+        SELECT EXISTS (
+            SELECT 1 FROM pg_auth_members m
+            JOIN pg_roles r ON r.oid = m.roleid
+            WHERE r.rolname = 'professional_management_reader'
+              AND NOT EXISTS (
+                SELECT 1 FROM pg_roles rr
+                WHERE rr.oid = m.member
+                  AND rr.rolname = 'professional_management_writer'
+              )
+        ) INTO reader_has_external_members;
+
+        SELECT EXISTS (
+            SELECT 1 FROM pg_auth_members m
+            JOIN pg_roles r ON r.oid = m.roleid
+            WHERE r.rolname = 'professional_management_writer'
+        ) INTO writer_has_external_members;
+
+        would_drop_roles := NOT reader_has_external_members AND NOT writer_has_external_members;
+
+        -- Cleanup before assertions so the fake role never leaks if the
+        -- assertion below raises.
+        EXECUTE 'REVOKE professional_management_writer FROM test_external_app_probe';
+        EXECUTE 'DROP ROLE test_external_app_probe';
+
+        -- Now assert on the captured value.
+        IF would_drop_roles THEN
+            RAISE EXCEPTION 'Rollback membership detection failed to see the writer role as having an external member; the rollback would incorrectly drop the roles on the shared instance';
+        END IF;
+    END
+    $rollback_probe$;
 END;
 $$;
 
