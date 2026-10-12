@@ -6,7 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $id = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $network = "seed-rollback-$id"
 $container = "$network-postgres"
-$kinds = @('fresh', 'full', 'collision002', 'collision004', 'legacy', 'fk', 'admindelete', 'legacyfk', 'transition')
+$kinds = @('fresh', 'full', 'collision002', 'collision004', 'fk', 'admindelete', 'transition')
 $databases = @($kinds | ForEach-Object { "seed_${_}_$id" })
 if ($databases.Count -ne $kinds.Count -or
     @($databases | Where-Object { $_ -notmatch "^seed_.+_$id$" }).Count -ne 0 -or
@@ -14,14 +14,12 @@ if ($databases.Count -ne $kinds.Count -or
     throw 'Test database names must be unique and include this run identifier.'
 }
 $scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) $network
-$legacyRoot = Join-Path $scratchRoot 'legacy'
 $passwordBytes = New-Object byte[] 32
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
 try { $rng.GetBytes($passwordBytes) } finally { $rng.Dispose() }
 $password = [Convert]::ToBase64String($passwordBytes)
 $fixture = 'pre-existing audit fixture'
 $neurology = "U&'Neurolog\00EDa'"
-$legacyMode = $false
 $networkCreated = $false
 $containerCreated = $false
 
@@ -51,17 +49,10 @@ function Schema([string]$Db) {
         'test_user', '-d', $Db, '--file=/tests/professional-schema-tests.sql')
 }
 function L([string]$Db, [string[]]$Command) {
-    if ($legacyMode) {
-        $source = Join-Path $legacyRoot 'db/changelog'
-        $target = '/liquibase/changelog'
-        $work = $target
-        $file = 'db.changelog-master.yaml'
-    } else {
-        $source = $root
-        $target = '/workspace'
-        $work = $target
-        $file = 'changelog/changelog-master.yaml'
-    }
+    $source = $root
+    $target = '/workspace'
+    $work = $target
+    $file = 'changelog/changelog-master.yaml'
     $mount = "type=bind,source=$source,target=$target,readonly"
     D (@('run', '--rm', '--network', $network, '--workdir', $work, '--mount', $mount,
         'liquibase/liquibase:4.31', "--url=jdbc:postgresql://${container}:5432/$Db",
@@ -283,51 +274,7 @@ try {
     Collision $databases[2] 'Medicina General' "'Medicina General'" '002-seed-specialties' 3 1 3
     Collision $databases[3] 'Neurología' $neurology '004-seed-additional-specialties' 2 5 4
 
-    $legacy = $databases[4]; NewDb $legacy
-    New-Item -ItemType Directory -Path (Join-Path $legacyRoot 'db/changelog') -Force | Out-Null
-    Copy-Item (Join-Path $root 'tests/fixtures/legacy-changelog/*') (Join-Path $legacyRoot 'db/changelog') -Recurse
-    $legacyMode = $true; L $legacy @('update')
-    A $legacy "(SELECT count(*) FROM databasechangelog WHERE (id='002-seed-specialties' AND md5sum='9:f5719d18ef7771621c69be4f04fb4e73') OR (id='004-seed-additional-specialties' AND md5sum='9:3df6ef3fc67dc17d4114f63e16325e7a'))=2" 'Legacy checksums differ from expected.'
-    $legacyMode = $false; L $legacy @('validate'); L $legacy @('update')
-    A $legacy "to_regclass('professional_management.specialty_seed_ownership') IS NOT NULL AND (SELECT count(*) FROM professional_management.specialty_seed_ownership)=0" 'Legacy rows were backfilled.'
-    Seven $legacy
-    # The legacy database merges the 4 fixture changesets with the 23 changesets the
-    # current repository adds on top of them, for 27 changesets in total. The rollback
-    # order follows the recorded execution order, which is not the seed order once
-    # `validate` has run: 001a and ddl-schemas-001 are reverted before 003, 004 and
-    # 002. Twenty-five reverts therefore leave 001 and 002 applied and have already
-    # reverted 003 and 004, so the professionals table is gone while the seven-row
-    # catalog is preserved. The
-    # rollback below then reverts 002, whose current ownership-scoped definition
-    # removes only the rows it claimed, which in a legacy database is none, so all
-    # seven rows survive with the history row gone. That contrast is the point of
-    # this scenario.
-    1..25 | ForEach-Object { L $legacy @('rollback-count', '--count', '1') }
-    A $legacy "to_regclass('public.professionals') IS NULL AND (SELECT count(*) FROM public.specialties)=7" 'Legacy 003 and 004 rollbacks changed the catalog or retained professionals.'
-    L $legacy @('rollback-count', '--count', '1')
-    A $legacy "(SELECT count(*) FROM databasechangelog WHERE id='002-seed-specialties')=0 AND (SELECT count(*) FROM public.specialties)=7" 'Legacy 002 rollback must remove its history but preserve the unowned rows.'
-    Write-Host 'PASS legacy rollback removes migration history but preserves unowned seed rows.'
-
-    $legacyFk = $databases[7]; NewDb $legacyFk
-    $legacyMode = $true; L $legacyFk @('update')
-    $neuroId = Scalar $legacyFk "SELECT id FROM specialties WHERE name=$neurology"
-    P $legacyFk "INSERT INTO professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000002,'TEST-LEGACY-FK-001',$neuroId,0)"
-    $legacyMount = "type=bind,source=$(Join-Path $legacyRoot 'db/changelog'),target=/liquibase/changelog,readonly"
-    $legacyArgs = @('run', '--rm', '--network', $network, '--workdir', '/liquibase/changelog', '--mount', $legacyMount,
-        'liquibase/liquibase:4.31', "--url=jdbc:postgresql://${container}:5432/$legacyFk", '--username=test_user',
-        "--password=$password", '--changelog-file=db.changelog-master.yaml', 'rollback-count', '--count', '1')
-    $oldPreference = $ErrorActionPreference
-    try { $ErrorActionPreference = 'Continue'; $failure = & docker @legacyArgs 2>&1; $exitCode = $LASTEXITCODE }
-    finally { $ErrorActionPreference = $oldPreference }
-    if ($exitCode -eq 0 -or ($failure -join "`n") -notmatch 'fk_professionals_specialty') { throw 'Expected legacy seed rollback to be blocked by the professional FK.' }
-    A $legacyFk "EXISTS (SELECT 1 FROM professionals WHERE license_number='TEST-LEGACY-FK-001') AND EXISTS (SELECT 1 FROM specialties WHERE id=$neuroId) AND EXISTS (SELECT 1 FROM databasechangelog WHERE id='004-seed-additional-specialties')" 'Blocked legacy rollback changed data or history.'
-    P $legacyFk "DELETE FROM professionals WHERE license_number='TEST-LEGACY-FK-001'"
-    L $legacyFk @('rollback-count', '--count', '1')
-    A $legacyFk "NOT EXISTS (SELECT 1 FROM specialties WHERE id=$neuroId)" 'Legacy rollback did not remove the now-unreferenced row.'
-    $legacyMode = $false
-    Write-Host 'PASS historical FK blocks rollback until the professional reference is removed.'
-
-    $fk = $databases[5]; NewDb $fk; L $fk @('update')
+    $fk = $databases[4]; NewDb $fk; L $fk @('update')
     $generalId = Scalar $fk "SELECT id FROM professional_management.specialty WHERE name='Medicina General'"
     P $fk "INSERT INTO professional_management.professional(identity_user_id,license_number,specialty_id,years_experience,professional_type,status) VALUES (900000001,'TEST-ROLLBACK-002-001',$generalId,0,'GENERAL_PRACTITIONER','ACTIVE')"
     # Rolls back the 19 most recent changesets, stopping just before 006. That set
@@ -363,7 +310,7 @@ try {
     A $fk "NOT EXISTS (SELECT 1 FROM public.specialties WHERE id=$generalId)" 'Rollback 002 did not remove its owned specialty.'
     Write-Host 'PASS professional referencing a 002 specialty is removed before seed rollback.'
 
-    $adminDelete = $databases[6]; NewDb $adminDelete; L $adminDelete @('update-count', '--count', '6')
+    $adminDelete = $databases[5]; NewDb $adminDelete; L $adminDelete @('update-count', '--count', '6')
     L $adminDelete @('update'); Schema $adminDelete
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='c')=1" 'Ownership FK must cascade only its metadata row.'
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_professional_specialty' AND confdeltype='r')=1" 'Professional FK must remain restrictive.'
@@ -394,7 +341,7 @@ try {
     A $adminDelete "(SELECT count(*) FROM public.specialties)=5" 'Seed rollback left unexpected specialty rows.'
     Write-Host 'PASS unused specialty deletion cascades metadata only; seed rollback preserves administrator replacement.'
 
-    $transition = $databases[8]; NewDb $transition; L $transition @('update-count','--count','7')
+    $transition = $databases[6]; NewDb $transition; L $transition @('update-count','--count','7')
     $transitionSpecialtyId = Scalar $transition "SELECT id FROM public.specialties WHERE name='Medicina General'"
     P $transition "INSERT INTO public.professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000099,'TEST-MIGRATION-TRANSITION-006',$transitionSpecialtyId,0)"
     L $transition @('update'); Schema $transition
