@@ -72,14 +72,21 @@ function A([string]$Db, [string]$Condition, [string]$Message) {
     P $Db "DO `$`$ BEGIN IF NOT ($Condition) THEN RAISE EXCEPTION '$message'; END IF; END; `$`$;"
 }
 function DomainSchema([string]$Db) {
-    if ((Scalar $Db "SELECT CASE WHEN to_regclass('professional_management.specialty') IS NOT NULL THEN 1 ELSE 0 END") -eq 1) {
+    # The domain schema is considered present whenever either the singular
+    # (after ddl-alter-012) or the plural (before it, or after it was
+    # rolled back) table exists in professional_management. Since the
+    # schema-qualification refactor, the tables never live in public.
+    $inDomain = Scalar $Db "SELECT CASE WHEN to_regclass('professional_management.specialty') IS NOT NULL OR to_regclass('professional_management.specialties') IS NOT NULL THEN 1 ELSE 0 END"
+    if ($inDomain -eq 1) {
         return 'professional_management'
     }
     return 'public'
 }
 # The specialty table is singular in professional_management after ddl-alter-012,
-# but keeps its historical plural name once that changeset has been rolled back
-# and the tables live in public. Same for the professional table.
+# and keeps its historical plural name once that changeset has been rolled back.
+# In both cases the tables remain in professional_management: since the
+# schema-qualification refactor, no changeset ever moves them to public.
+# Same for the professional table.
 function SpecialtyTable([string]$Db) {
     if ((DomainSchema $Db) -eq 'professional_management') { return 'specialty' }
     return 'specialties'
@@ -222,24 +229,24 @@ try {
     L $fresh @('rollback-count','--count','1')
     A $fresh "(SELECT count(*) FROM pg_constraint WHERE conrelid='professional_management.professionals'::regclass AND conname IN ('ck_professionals_years_experience_nonnegative','ck_professionals_professional_type','ck_professionals_status'))=3" 'Rollback 008 must restore the historical CHECK names.'
     L $fresh @('rollback-count','--count','1')
-    A $fresh "to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL AND to_regclass('public.specialties') IS NOT NULL AND to_regclass('public.specialty_seed_ownership') IS NOT NULL" 'Rollback 007 must return domain tables to public.'
+    A $fresh "to_regclass('professional_management.specialties') IS NOT NULL AND to_regclass('professional_management.professionals') IS NOT NULL AND to_regclass('professional_management.specialty_seed_ownership') IS NOT NULL AND to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL" 'Rollback 007 must leave the domain tables in professional_management (007 is a no-op after the schema-qualification refactor).'
     L $fresh @('rollback-count','--count','1')
-    A $fresh "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND to_regclass('public.professionals') IS NOT NULL" 'Rollback 006 must remove its columns but retain professionals.'
-    A $fresh "NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status')" 'Rollback 006 must remove its status index.'
+    A $fresh "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND to_regclass('professional_management.professionals') IS NOT NULL" 'Rollback 006 must remove its columns but retain professionals.'
+    A $fresh "NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='professional_management' AND tablename='professionals' AND indexname='idx_professionals_status')" 'Rollback 006 must remove its status index.'
     L $fresh @('rollback-count','--count','1')
     A $fresh "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Rollback 005 must restore the ownership FK behavior.'
     L $fresh @('rollback-count','--count','1')
-    A $fresh "to_regclass('public.professionals') IS NULL AND (SELECT count(*) FROM public.specialties)=7" 'Rollback 003 must remove professionals before seed rollback.'
+    A $fresh "to_regclass('professional_management.professionals') IS NULL AND (SELECT count(*) FROM professional_management.specialties)=7" 'Rollback 003 must remove professionals before seed rollback.'
     L $fresh @('rollback-count','--count','1')
-    A $fresh "(SELECT count(*) FROM public.specialties)=4" 'Rollback 004 did not retain 002 rows.'
+    A $fresh "(SELECT count(*) FROM professional_management.specialties)=4" 'Rollback 004 did not retain 002 rows.'
     Own $fresh '004-seed-additional-specialties' 0; Own $fresh '002-seed-specialties' 4
     L $fresh @('rollback-count','--count','1')
-    A $fresh "(SELECT count(*) FROM public.specialties)=0" '002-owned rows remain.'
+    A $fresh "(SELECT count(*) FROM professional_management.specialties)=0" '002-owned rows remain.'
     Own $fresh '002-seed-specialties' 0
     L $fresh @('rollback-count','--count','1')
-    A $fresh "to_regclass('public.specialty_seed_ownership') IS NULL" 'Ownership table remains.'
+    A $fresh "to_regclass('professional_management.specialty_seed_ownership') IS NULL" 'Ownership table remains.'
     L $fresh @('rollback-count','--count','1')
-    A $fresh "to_regclass('public.specialties') IS NULL" '001 did not remove specialties.'
+    A $fresh "to_regclass('professional_management.specialties') IS NULL" '001 did not remove specialties.'
     P $fresh 'CREATE TABLE professional_management.rollback_guard_probe (id integer)'
     $rollbackPreference = $ErrorActionPreference
     try {
