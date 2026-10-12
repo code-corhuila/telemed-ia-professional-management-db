@@ -328,24 +328,25 @@ try {
     # ddl-alter-014, ddl-alter-013, ddl-alter-012, ddl-alter-009, ddl-tables-004,
     # ddl-alter-011, ddl-alter-010, ddl-alter-008, ddl-alter-007 and 006. That
     # reverts 012, which restores the historical plural table names, and 007, which
-    # moves them back to public. 006 reverts cleanly here because the professionals
-    # table is empty: the scenario deleted the only seed-created row and the
-    # replacement specialty is unreferenced. The rollback of 006 also drops
+    # is a no-op. The tables stay in professional_management under their historical
+    # plural names. 006 reverts cleanly here because the professionals table is
+    # empty: the scenario deleted the only seed-created row and the replacement
+    # specialty is unreferenced. The rollback of 006 also drops
     # idx_professionals_status, so the assertion below checks the historical name
     # is gone, not present.
     L $adminDelete @('rollback-count','--count','20')
-    A $adminDelete "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status') AND to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL" 'Rollbacks through 006 must restore the plural tables to public and drop the lifecycle columns and their index.'
+    A $adminDelete "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professionals' AND column_name IN ('professional_type','status')) AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='professional_management' AND tablename='professionals' AND indexname='idx_professionals_status') AND to_regclass('professional_management.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL" 'Rollbacks through 006 must leave the plural tables in professional_management and drop the lifecycle columns and their index.'
     L $adminDelete @('rollback-count','--count','1')
     A $adminDelete "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Ownership FK rollback must restore NO ACTION.'
     L $adminDelete @('rollback-count','--count','1')
     L $adminDelete @('rollback-count','--count','1'); Own $adminDelete '004-seed-additional-specialties' 0
-    A $adminDelete "EXISTS (SELECT 1 FROM public.specialties WHERE id=$adminId AND name=$neurology AND description='administrator replacement')" 'Seed rollback deleted the administrator replacement.'
-    A $adminDelete "(SELECT count(*) FROM public.specialties)=5" 'Seed rollback left unexpected specialty rows.'
+    A $adminDelete "EXISTS (SELECT 1 FROM professional_management.specialties WHERE id=$adminId AND name=$neurology AND description='administrator replacement')" 'Seed rollback deleted the administrator replacement.'
+    A $adminDelete "(SELECT count(*) FROM professional_management.specialties)=5" 'Seed rollback left unexpected specialty rows.'
     Write-Host 'PASS unused specialty deletion cascades metadata only; seed rollback preserves administrator replacement.'
 
     $transition = $databases[6]; NewDb $transition; L $transition @('update-count','--count','7')
-    $transitionSpecialtyId = Scalar $transition "SELECT id FROM public.specialties WHERE name='Medicina General'"
-    P $transition "INSERT INTO public.professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000099,'TEST-MIGRATION-TRANSITION-006',$transitionSpecialtyId,0)"
+    $transitionSpecialtyId = Scalar $transition "SELECT id FROM professional_management.specialties WHERE name='Medicina General'"
+    P $transition "INSERT INTO professional_management.professionals(identity_user_id,license_number,specialty_id,years_experience) VALUES (900000099,'TEST-MIGRATION-TRANSITION-006',$transitionSpecialtyId,0)"
     L $transition @('update'); Schema $transition
     A $transition "EXISTS (SELECT 1 FROM professional_management.professional WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE')" 'Migration 006 must preserve unknown professional_type and default status to ACTIVE.'
 
@@ -364,7 +365,7 @@ try {
     if ($rollbackExitCode -eq 0 -or ($rollbackFailure -join "`n") -notmatch 'professionals contains records; removing professional_type and status could lose lifecycle data') {
         throw 'Rollback 006 must refuse to remove columns while any professional record exists.'
     }
-    A $transition "EXISTS (SELECT 1 FROM public.professionals WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='professional_type') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='status') AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='professionals' AND indexname='idx_professionals_status')" 'Rejected rollback must preserve the professional, columns, and status index.'
+    A $transition "EXISTS (SELECT 1 FROM professional_management.professionals WHERE license_number='TEST-MIGRATION-TRANSITION-006' AND professional_type IS NULL AND status='ACTIVE') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professionals' AND column_name='professional_type') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professionals' AND column_name='status') AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='professional_management' AND tablename='professionals' AND indexname='idx_professionals_status')" 'Rejected rollback must preserve the professional, columns, and status index.'
     Write-Host 'PASS migration 006 rollback is blocked without changing a professional or schema object.'
 } finally {
     $oldEap = $ErrorActionPreference
