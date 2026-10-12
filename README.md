@@ -198,10 +198,27 @@ This keeps reverse-order rollback safe with the restrictive foreign key from
 ### Rollback layout
 
 Rollbacks for **new** changesets live as external files under `05_rollbacks/`,
-mirroring the migration families. Historical changesets `001` through `006`
-were applied before this layout existed and keep their inline `--rollback`
-blocks; editing them would change their Liquibase checksum and break every
-environment that has applied them (database standard, rule 12).
+mirroring the migration families. Seven historical changesets — `001-create-specialties`,
+`001a-create-specialty-seed-ownership`, `002-seed-specialties`,
+`003-create-professionals`, `004-seed-additional-specialties`,
+`005-cascade-deleted-specialty-ownership` and
+`006-add-professional-type-and-status` — were applied before this layout
+existed and keep their `--rollback` blocks inline inside their own `.sql`
+files.
+
+Per Anexo A, the external-file requirement applies to migrations that
+reverse with a file (`espejo de cada migración que revierte con un
+archivo`). These seven reverse inline, so the standard is satisfied by
+their inline blocks. Editing them to add external rollbacks would change
+their Liquibase checksum and break every environment that has already
+applied them (rule 12, "un changeset aplicado nunca se edita"). Their
+inline rollback is the traceable, applied reversal.
+
+If a future changeset needs a rollback that cannot be expressed inline
+(conditional logic across tables, data restoration from an external
+source), it declares its rollback through the YAML changeSet form and
+places the file under `05_rollbacks/`, which is the pattern used by the
+other twenty changesets.
 
 See [`05_rollbacks/README.md`](05_rollbacks/README.md) for details.
 
