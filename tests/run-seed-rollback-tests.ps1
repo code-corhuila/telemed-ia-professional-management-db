@@ -82,17 +82,17 @@ function DomainSchema([string]$Db) {
     }
     return 'public'
 }
-# The specialty table is singular in professional_management after ddl-alter-012,
-# and keeps its historical plural name once that changeset has been rolled back.
-# In both cases the tables remain in professional_management: since the
-# schema-qualification refactor, no changeset ever moves them to public.
-# Same for the professional table.
+# The table is singular after ddl-alter-012 has been applied, and plural
+# before it, or after it has been rolled back. Both variants live in
+# professional_management since the schema-qualification refactor. The
+# test chooses the name based on which physical table exists, not on the
+# schema alone.
 function SpecialtyTable([string]$Db) {
-    if ((DomainSchema $Db) -eq 'professional_management') { return 'specialty' }
+    if ((Scalar $Db "SELECT CASE WHEN to_regclass('professional_management.specialty') IS NOT NULL THEN 1 ELSE 0 END") -eq 1) { return 'specialty' }
     return 'specialties'
 }
 function ProfessionalTable([string]$Db) {
-    if ((DomainSchema $Db) -eq 'professional_management') { return 'professional' }
+    if ((Scalar $Db "SELECT CASE WHEN to_regclass('professional_management.professional') IS NOT NULL THEN 1 ELSE 0 END") -eq 1) { return 'professional' }
     return 'professionals'
 }
 function Own([string]$Db, [string]$Change, [int]$Count) {
