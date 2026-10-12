@@ -16,7 +16,8 @@ databaseChangeLog:
   - changeSet:
       id: ddl-alter-007
       author: telemed
-      comment: "Move Professional Management domain tables into their dedicated schema."
+      validCheckSum: 9:ad150acf692c70dac6032c4d5a497f6c
+      comment: "Historical move of domain tables from public to professional_management. Now a no-op after schema qualification was added to changesets 001-006."
       changes:
         - sqlFile:
             path: 007_move_domain_tables_to_schema.sql
