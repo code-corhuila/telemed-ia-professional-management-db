@@ -278,13 +278,15 @@ try {
     $generalId = Scalar $fk "SELECT id FROM professional_management.specialty WHERE name='Medicina General'"
     P $fk "INSERT INTO professional_management.professional(identity_user_id,license_number,specialty_id,years_experience,professional_type,status) VALUES (900000001,'TEST-ROLLBACK-002-001',$generalId,0,'GENERAL_PRACTITIONER','ACTIVE')"
     # Rolls back the 19 most recent changesets, stopping just before 006. That set
-    # includes ddl-alter-007, which moves the domain tables from professional_management
-    # back to public, and ddl-alter-012, which renamed them to singular, already
-    # reverted by then. The tables are back under their historical plural names in
-    # public, with the professional row still present. 006 stays applied on purpose:
-    # the single rollback below must be refused while that row exists.
+    # includes ddl-alter-012, which renames the domain tables from singular back to
+    # their historical plural names. ddl-alter-007 is also in that set, but it is
+    # now a no-op: after the schema-qualification refactor, the tables never left
+    # professional_management. The tables stay in professional_management under
+    # their historical plural names, with the professional row still present. 006
+    # stays applied on purpose: the single rollback below must be refused while
+    # that row exists.
     L $fk @('rollback-count', '--count', '19')
-    A $fk "to_regclass('public.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL AND EXISTS (SELECT 1 FROM public.professionals WHERE license_number='TEST-ROLLBACK-002-001')" 'Rollback of ddl-alter-012 and ddl-alter-007 must restore the plural table names in public and preserve the professional.'
+    A $fk "to_regclass('professional_management.professionals') IS NOT NULL AND to_regclass('professional_management.professional') IS NULL AND EXISTS (SELECT 1 FROM professional_management.professionals WHERE license_number='TEST-ROLLBACK-002-001')" 'Rollback of ddl-alter-012 must restore the plural table name in professional_management (007 is a no-op after the schema-qualification refactor).'
     $rollbackPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
@@ -296,18 +298,18 @@ try {
     if ($rollbackExitCode -eq 0 -or ($rollbackFailure -join "`n") -notmatch 'Rollback 006 refused') {
         throw 'Rollback 006 must be blocked while professionals exist.'
     }
-    A $fk "EXISTS (SELECT 1 FROM public.professionals WHERE license_number='TEST-ROLLBACK-002-001') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='professional_type')" 'Rejected rollback must preserve the professional and columns.'
-    P $fk "DELETE FROM public.professionals WHERE license_number='TEST-ROLLBACK-002-001'"
+    A $fk "EXISTS (SELECT 1 FROM professional_management.professionals WHERE license_number='TEST-ROLLBACK-002-001') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professionals' AND column_name='professional_type')" 'Rejected rollback must preserve the professional and columns.'
+    P $fk "DELETE FROM professional_management.professionals WHERE license_number='TEST-ROLLBACK-002-001'"
     L $fk @('rollback-count', '--count', '1')
-    A $fk "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='professional_type') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='professionals' AND column_name='status')" 'Rollback 006 must remove both lifecycle columns.'
+    A $fk "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professionals' AND column_name='professional_type') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professionals' AND column_name='status')" 'Rollback 006 must remove both lifecycle columns.'
     L $fk @('rollback-count', '--count', '1')
     A $fk "(SELECT count(*) FROM pg_constraint WHERE conname='fk_specialty_seed_ownership_specialty' AND confdeltype='a')=1" 'Rollback 005 must restore the ownership FK behavior.'
     L $fk @('rollback-count', '--count', '1')
-    A $fk "to_regclass('public.professionals') IS NULL AND (SELECT count(*) FROM public.specialties)=7" 'Rollback 003 must remove professionals before seed rollback.'
+    A $fk "to_regclass('professional_management.professionals') IS NULL AND (SELECT count(*) FROM professional_management.specialties)=7" 'Rollback 003 must remove professionals before seed rollback.'
     L $fk @('rollback-count', '--count', '1')
-    A $fk "NOT EXISTS (SELECT 1 FROM public.specialties WHERE name='Neurología') AND EXISTS (SELECT 1 FROM public.specialties WHERE id=$generalId)" 'Rollback 004 changed the 002 specialty.'
+    A $fk "NOT EXISTS (SELECT 1 FROM professional_management.specialties WHERE name='Neurología') AND EXISTS (SELECT 1 FROM professional_management.specialties WHERE id=$generalId)" 'Rollback 004 changed the 002 specialty.'
     L $fk @('rollback-count', '--count', '1')
-    A $fk "NOT EXISTS (SELECT 1 FROM public.specialties WHERE id=$generalId)" 'Rollback 002 did not remove its owned specialty.'
+    A $fk "NOT EXISTS (SELECT 1 FROM professional_management.specialties WHERE id=$generalId)" 'Rollback 002 did not remove its owned specialty.'
     Write-Host 'PASS professional referencing a 002 specialty is removed before seed rollback.'
 
     $adminDelete = $databases[5]; NewDb $adminDelete; L $adminDelete @('update-count', '--count', '6')
