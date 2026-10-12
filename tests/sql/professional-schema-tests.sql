@@ -15,13 +15,18 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'r'
-          AND c.relname NOT IN ('databasechangelog', 'databasechangeloglock'))
+          AND c.relname NOT IN (
+              'databasechangelog',
+              'databasechangeloglock',
+              'databasechangelog_professional_management',
+              'databasechangeloglock_professional_management'
+          ))
     THEN RAISE EXCEPTION 'Unexpected public tables exist'; END IF;
 
-    IF to_regclass('professional_management.specialties') IS NULL
-       OR to_regclass('professional_management.professionals') IS NULL
+    IF to_regclass('professional_management.specialty') IS NULL
+       OR to_regclass('professional_management.professional') IS NULL
        OR to_regclass('professional_management.specialty_seed_ownership') IS NULL
-    THEN RAISE EXCEPTION 'Expected specialties and professionals tables'; END IF;
+    THEN RAISE EXCEPTION 'Expected specialty and professional tables'; END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader' AND NOT rolcanlogin) THEN
         RAISE EXCEPTION 'professional_management_reader NOLOGIN role is missing';
@@ -38,17 +43,17 @@ BEGIN
     IF NOT has_schema_privilege('professional_management_writer', 'professional_management', 'USAGE') THEN
         RAISE EXCEPTION 'professional_management_writer lacks USAGE on professional_management schema';
     END IF;
-    IF NOT has_table_privilege('professional_management_reader', 'professional_management.professionals', 'SELECT') THEN
-        RAISE EXCEPTION 'professional_management_reader lacks SELECT on professionals';
+    IF NOT has_table_privilege('professional_management_reader', 'professional_management.professional', 'SELECT') THEN
+        RAISE EXCEPTION 'professional_management_reader lacks SELECT on professional';
     END IF;
-    IF has_table_privilege('professional_management_reader', 'professional_management.professionals', 'INSERT') THEN
-        RAISE EXCEPTION 'professional_management_reader unexpectedly has INSERT on professionals';
+    IF has_table_privilege('professional_management_reader', 'professional_management.professional', 'INSERT') THEN
+        RAISE EXCEPTION 'professional_management_reader unexpectedly has INSERT on professional';
     END IF;
-    IF NOT has_table_privilege('professional_management_writer', 'professional_management.professionals', 'SELECT,INSERT,UPDATE,DELETE') THEN
-        RAISE EXCEPTION 'professional_management_writer lacks CRUD privileges on professionals';
+    IF NOT has_table_privilege('professional_management_writer', 'professional_management.professional', 'SELECT,INSERT,UPDATE,DELETE') THEN
+        RAISE EXCEPTION 'professional_management_writer lacks CRUD privileges on professional';
     END IF;
     IF NOT has_sequence_privilege('professional_management_writer',
-        pg_get_serial_sequence('professional_management.professionals', 'id'), 'USAGE') THEN
+        pg_get_serial_sequence('professional_management.professional', 'id'), 'USAGE') THEN
         RAISE EXCEPTION 'professional_management_writer lacks USAGE on professional sequences';
     END IF;
 
@@ -66,7 +71,7 @@ BEGIN
     EXECUTE 'DROP TABLE professional_management.grant_default_probe';
 
     SELECT COUNT(*) INTO actual_count
-    FROM professional_management.specialties
+    FROM professional_management.specialty
     WHERE (name, description) IN (
         ('Medicina General', 'Atención médica general y orientación inicial.'),
         ('Pediatría', 'Atención integral de población pediátrica.'),
@@ -76,77 +81,109 @@ BEGIN
         ('Ginecología', 'Atención de la salud del sistema reproductivo femenino.'),
         ('Ortopedia', 'Atención de enfermedades y lesiones del sistema musculoesquelético.')
     );
-    IF actual_count <> 7 OR (SELECT COUNT(*) FROM professional_management.specialties) <> 7
+    IF actual_count <> 7 OR (SELECT COUNT(*) FROM professional_management.specialty) <> 7
     THEN RAISE EXCEPTION 'Expected exactly seven specialty seeds'; END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
-        WHERE table_schema = 'professional_management' AND table_name = 'professionals'
+        WHERE table_schema = 'professional_management' AND table_name = 'professional'
           AND column_name = 'specialty_id' AND is_nullable = 'NO') <> 1
-    THEN RAISE EXCEPTION 'Expected professionals.specialty_id to be NOT NULL'; END IF;
+    THEN RAISE EXCEPTION 'Expected professional.specialty_id to be NOT NULL'; END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
-        WHERE table_schema = 'professional_management' AND table_name = 'professionals'
-          AND column_name = 'professional_type' AND data_type = 'character varying'
-          AND character_maximum_length = 30 AND is_nullable = 'YES') <> 1
-    THEN RAISE EXCEPTION 'Expected nullable professionals.professional_type VARCHAR(30)'; END IF;
+        WHERE table_schema = 'professional_management' AND table_name = 'professional'
+          AND column_name = 'professional_type' AND data_type = 'text'
+          AND is_nullable = 'YES') <> 1
+    THEN RAISE EXCEPTION 'Expected nullable professional.professional_type text'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.professional'::regclass
+          AND conname = 'chk_professionals_professional_type_length' AND contype = 'c' AND convalidated) <> 1
+    THEN RAISE EXCEPTION 'Expected chk_professionals_professional_type_length CHECK'; END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
-        WHERE table_schema = 'professional_management' AND table_name = 'professionals'
-          AND column_name = 'status' AND data_type = 'character varying'
-          AND character_maximum_length = 20 AND is_nullable = 'NO') <> 1
-    THEN RAISE EXCEPTION 'Expected professionals.status VARCHAR(20) NOT NULL'; END IF;
+        WHERE table_schema = 'professional_management' AND table_name = 'professional'
+          AND column_name = 'status' AND data_type = 'text'
+          AND is_nullable = 'NO') <> 1
+    THEN RAISE EXCEPTION 'Expected professional.status text NOT NULL'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.professional'::regclass
+          AND conname = 'chk_professionals_status_length' AND contype = 'c' AND convalidated) <> 1
+    THEN RAISE EXCEPTION 'Expected chk_professionals_status_length CHECK'; END IF;
 
     IF (SELECT column_default FROM information_schema.columns
-        WHERE table_schema = 'professional_management' AND table_name = 'professionals'
-          AND column_name = 'status') <> '''ACTIVE''::character varying'
-    THEN RAISE EXCEPTION 'Expected professionals.status DEFAULT ACTIVE'; END IF;
+        WHERE table_schema = 'professional_management' AND table_name = 'professional'
+          AND column_name = 'status') <> '''ACTIVE''::text'
+    THEN RAISE EXCEPTION 'Expected professional.status DEFAULT ACTIVE'; END IF;
 
     IF (SELECT COUNT(*) FROM information_schema.columns
-        WHERE table_schema = 'professional_management' AND table_name = 'professionals'
+        WHERE table_schema = 'professional_management' AND table_name = 'professional'
           AND column_name IN ('active', 'is_active', 'deleted_at')) <> 0
     THEN RAISE EXCEPTION 'Unexpected professional lifecycle columns exist'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.professionals'::regclass
+        WHERE conrelid = 'professional_management.professional'::regclass
           AND conname = 'chk_professionals_years_experience_nonnegative' AND contype = 'c' AND convalidated) <> 1
     THEN RAISE EXCEPTION 'Expected validated nonnegative years_experience CHECK constraint'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.professionals'::regclass
+        WHERE conrelid = 'professional_management.professional'::regclass
           AND conname = 'chk_professionals_professional_type' AND contype = 'c' AND convalidated) <> 1
     THEN RAISE EXCEPTION 'Expected validated professional_type CHECK constraint'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.professionals'::regclass
+        WHERE conrelid = 'professional_management.professional'::regclass
           AND conname = 'chk_professionals_status' AND contype = 'c' AND convalidated) <> 1
     THEN RAISE EXCEPTION 'Expected validated status CHECK constraint'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.professionals'::regclass AND contype = 'f'
-          AND confrelid = 'professional_management.specialties'::regclass
-          AND pg_get_constraintdef(oid) ILIKE '%ON DELETE RESTRICT%') <> 1
-    THEN RAISE EXCEPTION 'Expected restrictive specialty foreign key'; END IF;
+        WHERE conname = 'uq_specialties_name' AND contype = 'u') <> 1
+    THEN RAISE EXCEPTION 'Expected uq_specialties_name'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.professionals'::regclass AND contype = 'f'
-          AND confrelid <> 'professional_management.specialties'::regclass) <> 0
+        WHERE conname = 'uq_professionals_identity_user_id' AND contype = 'u') <> 1
+    THEN RAISE EXCEPTION 'Expected uq_professionals_identity_user_id'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conname = 'uq_professionals_license_number' AND contype = 'u') <> 1
+    THEN RAISE EXCEPTION 'Expected uq_professionals_license_number'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.professional'::regclass
+          AND conname = 'fk_professional_specialty'
+          AND contype = 'f'
+          AND convalidated = true
+          AND confrelid = 'professional_management.specialty'::regclass
+          AND pg_get_constraintdef(oid) ILIKE '%ON DELETE RESTRICT%') <> 1
+    THEN RAISE EXCEPTION 'Expected validated fk_professional_specialty with ON DELETE RESTRICT'; END IF;
+
+    -- ddl-alter-013 drops the historical plural constraint, so it must no longer
+    -- exist anywhere after the full update. This catches a partially applied
+    -- migration in which the new FK was added but the old one was left behind.
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conname = 'fk_professionals_specialty') <> 0
+    THEN RAISE EXCEPTION 'Historical fk_professionals_specialty must be gone after ddl-alter-013'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.professional'::regclass AND contype = 'f'
+          AND confrelid <> 'professional_management.specialty'::regclass) <> 0
     THEN RAISE EXCEPTION 'Unexpected cross-database foreign key'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_indexes
-        WHERE schemaname = 'professional_management' AND tablename = 'professionals'
-          AND indexname = 'idx_professionals_specialty_id') <> 1
+        WHERE schemaname = 'professional_management' AND tablename = 'professional'
+          AND indexname = 'idx_professional_specialty_id') <> 1
     THEN RAISE EXCEPTION 'Expected specialty_id index'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_index i
         JOIN pg_attribute a ON a.attrelid = i.indrelid
                            AND a.attname = 'status'
                            AND a.attnum = ANY(i.indkey)
-        WHERE i.indrelid = 'professional_management.professionals'::regclass AND i.indisvalid) <> 1
+        WHERE i.indrelid = 'professional_management.professional'::regclass AND i.indisvalid) <> 1
        OR (SELECT COUNT(*) FROM pg_indexes
-           WHERE schemaname = 'professional_management' AND tablename = 'professionals'
-             AND indexname = 'idx_professionals_status'
+           WHERE schemaname = 'professional_management' AND tablename = 'professional'
+             AND indexname = 'idx_professional_status'
              AND indexdef ILIKE '%(status)%') <> 1
-    THEN RAISE EXCEPTION 'Expected exactly one status index named idx_professionals_status'; END IF;
+    THEN RAISE EXCEPTION 'Expected exactly one status index named idx_professional_status'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_indexes
         WHERE schemaname = 'professional_management' AND tablename = 'specialty_seed_ownership'
@@ -154,68 +191,128 @@ BEGIN
           AND indexdef ILIKE '%(specialty_id)%') <> 1
     THEN RAISE EXCEPTION 'Expected specialty_seed_ownership specialty_id index'; END IF;
 
-    INSERT INTO professional_management.specialties (name, description)
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.specialty_seed_ownership'::regclass
+          AND conname = 'fk_specialty_seed_ownership_specialty'
+          AND contype = 'f'
+          AND confdeltype = 'c') <> 1
+    THEN RAISE EXCEPTION 'Expected ownership FK with ON DELETE CASCADE'; END IF;
+
+    -- ddl-alter-015 re-declares this FK from 04_alter with NOT VALID and
+    -- ddl-alter-016 validates it. convalidated = false would mean the expand
+    -- half ran without its contract half, leaving existing rows unchecked.
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.specialty_seed_ownership'::regclass
+          AND conname = 'fk_specialty_seed_ownership_specialty'
+          AND contype = 'f'
+          AND convalidated = true
+          AND confrelid = 'professional_management.specialty'::regclass
+          AND pg_get_constraintdef(oid) ILIKE '%ON DELETE CASCADE%') <> 1
+    THEN RAISE EXCEPTION 'Expected validated fk_specialty_seed_ownership_specialty with ON DELETE CASCADE'; END IF;
+
+    -- The UNIQUE constraints renamed by ddl-alter-010 must still reject
+    -- duplicates. Each block raises a plain exception when the insert is
+    -- wrongly accepted; only unique_violation is swallowed, so an accepted
+    -- duplicate fails the run instead of passing silently.
+    BEGIN
+        INSERT INTO professional_management.specialty (name, description)
+        VALUES ('Medicina General', 'dup');
+        RAISE EXCEPTION 'Duplicate specialty name should be rejected';
+    EXCEPTION WHEN unique_violation THEN NULL;
+    END;
+
+    -- The two professional duplicates need a stored row to collide with, so
+    -- the baseline professional is created outside the assertion block.
+    INSERT INTO professional_management.professional
+        (identity_user_id, license_number, specialty_id, years_experience)
+    SELECT 999999991, 'DUP-LICENSE', id, 0
+    FROM professional_management.specialty WHERE name = 'Pediatría';
+
+    BEGIN
+        INSERT INTO professional_management.professional
+            (identity_user_id, license_number, specialty_id, years_experience)
+        SELECT 999999992, 'DUP-LICENSE', id, 0
+        FROM professional_management.specialty WHERE name = 'Pediatría';
+        RAISE EXCEPTION 'Duplicate license_number should be rejected';
+    EXCEPTION WHEN unique_violation THEN NULL;
+    END;
+
+    BEGIN
+        INSERT INTO professional_management.professional
+            (identity_user_id, license_number, specialty_id, years_experience)
+        SELECT 999999991, 'DUP-IDENTITY', id, 0
+        FROM professional_management.specialty WHERE name = 'Pediatría';
+        RAISE EXCEPTION 'Duplicate identity_user_id should be rejected';
+    EXCEPTION WHEN unique_violation THEN NULL;
+    END;
+
+    DELETE FROM professional_management.professional WHERE license_number = 'DUP-LICENSE';
+    IF EXISTS (SELECT 1 FROM professional_management.professional
+               WHERE license_number = 'DUP-LICENSE' OR identity_user_id = 999999991)
+    THEN RAISE EXCEPTION 'Rejected duplicates must not create a professional'; END IF;
+
+    INSERT INTO professional_management.specialty (name, description)
     VALUES ('Prueba eliminación libre', 'Delete test');
-    DELETE FROM professional_management.specialties WHERE name = 'Prueba eliminación libre';
-    IF EXISTS (SELECT 1 FROM professional_management.specialties WHERE name = 'Prueba eliminación libre')
+    DELETE FROM professional_management.specialty WHERE name = 'Prueba eliminación libre';
+    IF EXISTS (SELECT 1 FROM professional_management.specialty WHERE name = 'Prueba eliminación libre')
     THEN RAISE EXCEPTION 'Unreferenced specialty should be deletable'; END IF;
 
-    INSERT INTO professional_management.specialties (name, description)
+    INSERT INTO professional_management.specialty (name, description)
     VALUES ('Prueba eliminación protegida', 'Delete protection test')
     RETURNING id INTO protected_specialty_id;
-    INSERT INTO professional_management.professionals
+    INSERT INTO professional_management.professional
         (identity_user_id, license_number, specialty_id, years_experience, professional_type, status)
     VALUES (900000001, 'TEST-SAFE-DELETE-001', protected_specialty_id, 0,
             'GENERAL_PRACTITIONER', 'ACTIVE');
 
-    INSERT INTO professional_management.professionals
+    INSERT INTO professional_management.professional
         (identity_user_id, license_number, specialty_id, years_experience)
     VALUES (900000002, 'TEST-API-INSERT-001', protected_specialty_id, 0);
-    IF NOT EXISTS (SELECT 1 FROM professional_management.professionals
+    IF NOT EXISTS (SELECT 1 FROM professional_management.professional
                    WHERE license_number = 'TEST-API-INSERT-001'
                      AND professional_type IS NULL AND status = 'ACTIVE')
     THEN RAISE EXCEPTION 'API-compatible insert must default status and retain null professional_type'; END IF;
 
-    UPDATE professional_management.professionals
+    UPDATE professional_management.professional
     SET professional_type = 'SPECIALIST', status = 'INACTIVE'
     WHERE license_number = 'TEST-SAFE-DELETE-001';
-    IF NOT EXISTS (SELECT 1 FROM professional_management.professionals
+    IF NOT EXISTS (SELECT 1 FROM professional_management.professional
                    WHERE license_number = 'TEST-SAFE-DELETE-001'
                      AND professional_type = 'SPECIALIST' AND status = 'INACTIVE')
     THEN RAISE EXCEPTION 'Expected the allowed professional_type and status values'; END IF;
 
-    UPDATE professional_management.professionals SET professional_type = 'GENERAL_PRACTITIONER'
+    UPDATE professional_management.professional SET professional_type = 'GENERAL_PRACTITIONER'
     WHERE license_number = 'TEST-SAFE-DELETE-001';
-    UPDATE professional_management.professionals SET status = 'ACTIVE'
+    UPDATE professional_management.professional SET status = 'ACTIVE'
     WHERE license_number = 'TEST-SAFE-DELETE-001';
 
     BEGIN
-        UPDATE professional_management.professionals SET professional_type = 'INVALID'
+        UPDATE professional_management.professional SET professional_type = 'INVALID'
         WHERE license_number = 'TEST-SAFE-DELETE-001';
         RAISE EXCEPTION 'Invalid professional_type should be rejected';
     EXCEPTION WHEN check_violation THEN NULL;
     END;
 
     BEGIN
-        UPDATE professional_management.professionals SET status = 'PENDING'
+        UPDATE professional_management.professional SET status = 'PENDING'
         WHERE license_number = 'TEST-SAFE-DELETE-001';
         RAISE EXCEPTION 'Invalid status should be rejected';
     EXCEPTION WHEN check_violation THEN NULL;
     END;
 
     BEGIN
-        DELETE FROM professional_management.specialties WHERE id = protected_specialty_id;
+        DELETE FROM professional_management.specialty WHERE id = protected_specialty_id;
         RAISE EXCEPTION 'Referenced specialty should not be deletable';
     EXCEPTION WHEN foreign_key_violation THEN NULL;
     END;
 
-    IF NOT EXISTS (SELECT 1 FROM professional_management.professionals
+    IF NOT EXISTS (SELECT 1 FROM professional_management.professional
                    WHERE license_number = 'TEST-SAFE-DELETE-001')
     THEN RAISE EXCEPTION 'Professional must remain after rejected delete'; END IF;
 
-    DELETE FROM professional_management.professionals WHERE license_number = 'TEST-SAFE-DELETE-001';
-    DELETE FROM professional_management.professionals WHERE license_number = 'TEST-API-INSERT-001';
-    DELETE FROM professional_management.specialties WHERE id = protected_specialty_id;
+    DELETE FROM professional_management.professional WHERE license_number = 'TEST-SAFE-DELETE-001';
+    DELETE FROM professional_management.professional WHERE license_number = 'TEST-API-INSERT-001';
+    DELETE FROM professional_management.specialty WHERE id = protected_specialty_id;
 
     IF to_regclass('professional_management.idempotency_key') IS NULL THEN
         RAISE EXCEPTION 'Expected table professional_management.idempotency_key';
@@ -227,6 +324,29 @@ BEGIN
 
     IF (SELECT COUNT(*) FROM pg_constraint WHERE conname = 'fk_idempotency_key_professional' AND contype = 'f' AND confdeltype = 'c') <> 1 THEN
         RAISE EXCEPTION 'Expected foreign key fk_idempotency_key_professional with ON DELETE CASCADE';
+    END IF;
+
+    -- ddl-alter-017 re-declares this FK from 04_alter with NOT VALID and
+    -- ddl-alter-018 validates it, so the constraint must be marked validated
+    -- after a full update: convalidated = false would mean the expand half ran
+    -- without its contract half and orphan rows are still unchecked.
+    IF (SELECT COUNT(*) FROM pg_constraint
+        WHERE conrelid = 'professional_management.idempotency_key'::regclass
+          AND conname = 'fk_idempotency_key_professional'
+          AND contype = 'f'
+          AND convalidated = true
+          AND confrelid = 'professional_management.professional'::regclass
+          AND pg_get_constraintdef(oid) ILIKE '%ON DELETE CASCADE%') <> 1 THEN
+        RAISE EXCEPTION 'Expected validated fk_idempotency_key_professional with ON DELETE CASCADE';
+    END IF;
+
+    IF (SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_schema = 'professional_management'
+          AND table_name = 'idempotency_key'
+          AND column_name = 'request_hash'
+          AND data_type = 'text'
+          AND is_nullable = 'YES') <> 1 THEN
+        RAISE EXCEPTION 'Expected nullable text column professional_management.idempotency_key.request_hash';
     END IF;
 
     IF NOT has_table_privilege('professional_management_reader', 'professional_management.idempotency_key', 'SELECT') THEN
@@ -241,12 +361,12 @@ BEGIN
     -- constraint that can reject the negative cases below. Inserting a NULL
     -- professional_id would be refused by the NOT NULL constraint instead, and
     -- the test would pass without ever exercising chk_idempotency_key_length.
-    INSERT INTO professional_management.professionals
+    INSERT INTO professional_management.professional
         (identity_user_id, license_number, specialty_id, years_experience)
     SELECT 999999999, 'TEST-IDEMP-LEN', id, 0
-    FROM professional_management.specialties WHERE name = 'Medicina General';
+    FROM professional_management.specialty WHERE name = 'Medicina General';
 
-    SELECT id INTO test_professional_id FROM professional_management.professionals
+    SELECT id INTO test_professional_id FROM professional_management.professional
     WHERE license_number = 'TEST-IDEMP-LEN';
 
     IF test_professional_id IS NULL THEN
@@ -282,10 +402,104 @@ BEGIN
     THEN RAISE EXCEPTION 'Boundary-length keys must be accepted'; END IF;
 
     -- Cleanup. A CASCADE delete also proves the FK really cascades.
-    DELETE FROM professional_management.professionals WHERE license_number = 'TEST-IDEMP-LEN';
+    DELETE FROM professional_management.professional WHERE license_number = 'TEST-IDEMP-LEN';
     IF EXISTS (SELECT 1 FROM professional_management.idempotency_key
                WHERE professional_id = test_professional_id)
     THEN RAISE EXCEPTION 'idempotency_key rows must be removed by ON DELETE CASCADE'; END IF;
+
+    -- The suffix assertion applies by default. The databases it must
+    -- NOT run against are the seed rollback integration test's
+    -- fixtures (`seed_<variant>_<hash>`), which deliberately create the
+    -- unsuffixed `databasechangelog` from legacy changelogs to test
+    -- legacy compatibility. Any other database name — the normal CI
+    -- fixture, the shared instance, a future test harness — gets the
+    -- assertion by default, so a regression into unsuffixed control
+    -- tables cannot slip through silently.
+    IF current_database() NOT LIKE 'seed_%' THEN
+        IF (SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_name IN (
+                'databasechangelog_professional_management',
+                'databasechangeloglock_professional_management'
+            )) <> 2 THEN
+            RAISE EXCEPTION 'Expected domain-suffixed Liquibase control tables';
+        END IF;
+    END IF;
+
+    -- Simulate re-application of the role changeset against a database
+    -- where the roles already exist. This exercises the no-op branch
+    -- of the idempotent DO block added in PR #26.
+    DO $inner$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader') THEN
+            CREATE ROLE professional_management_reader NOLOGIN;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_writer') THEN
+            CREATE ROLE professional_management_writer NOLOGIN;
+        END IF;
+    END
+    $inner$;
+
+    -- Both roles must still exist after the second application.
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader') THEN
+        RAISE EXCEPTION 'reader role was dropped during re-application';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_writer') THEN
+        RAISE EXCEPTION 'writer role was dropped during re-application';
+    END IF;
+
+    -- Exercise the membership-detection query used by the rollback of
+    -- 001-create-roles. The rollback decides whether to drop the
+    -- reader/writer roles based on whether either role has any member
+    -- other than the nested reader->writer pair. That detection branch
+    -- is critical (it decides a destructive DROP ROLE) and must not
+    -- remain untested.
+    --
+    -- This test does NOT run the rollback (that would drop roles the
+    -- other tests depend on). It replicates the detection query against
+    -- a simulated "shared instance" state — a fake external role granted
+    -- the writer role — and asserts the query returns true. If that
+    -- detection ever regresses, this assertion fails and the destructive
+    -- path would be caught before merge.
+    DO $rollback_probe$
+    DECLARE
+        reader_has_external_members boolean;
+        writer_has_external_members boolean;
+        would_drop_roles boolean;
+    BEGIN
+        -- Simulate infra's app user being granted the writer role.
+        EXECUTE 'CREATE ROLE test_external_app_probe NOLOGIN';
+        EXECUTE 'GRANT professional_management_writer TO test_external_app_probe';
+
+        SELECT EXISTS (
+            SELECT 1 FROM pg_auth_members m
+            JOIN pg_roles r ON r.oid = m.roleid
+            WHERE r.rolname = 'professional_management_reader'
+              AND NOT EXISTS (
+                SELECT 1 FROM pg_roles rr
+                WHERE rr.oid = m.member
+                  AND rr.rolname = 'professional_management_writer'
+              )
+        ) INTO reader_has_external_members;
+
+        SELECT EXISTS (
+            SELECT 1 FROM pg_auth_members m
+            JOIN pg_roles r ON r.oid = m.roleid
+            WHERE r.rolname = 'professional_management_writer'
+        ) INTO writer_has_external_members;
+
+        would_drop_roles := NOT reader_has_external_members AND NOT writer_has_external_members;
+
+        -- Cleanup before assertions so the fake role never leaks if the
+        -- assertion below raises.
+        EXECUTE 'REVOKE professional_management_writer FROM test_external_app_probe';
+        EXECUTE 'DROP ROLE test_external_app_probe';
+
+        -- Now assert on the captured value.
+        IF would_drop_roles THEN
+            RAISE EXCEPTION 'Rollback membership detection failed to see the writer role as having an external member; the rollback would incorrectly drop the roles on the shared instance';
+        END IF;
+    END
+    $rollback_probe$;
 END;
 $$;
 
