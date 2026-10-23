@@ -17,6 +17,10 @@ databaseChangeLog:
   - include:
       file: ../03_dcl/changelog.yaml
       relativeToChangelogFile: true
+  # Phase 4b: DDL appended after the grants (DEC-005). See 01_ddl/changelog-post-dcl.yaml.
+  - include:
+      file: ../01_ddl/changelog-post-dcl.yaml
+      relativeToChangelogFile: true
   # Phase 5: TCL
   - include:
       file: ../04_tcl/changelog.yaml
