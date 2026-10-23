@@ -189,15 +189,15 @@ try {
     }
 
     Assert-Schema
-    Assert-Sql "SELECT (SELECT count(*) FROM databasechangelog) = $expectedChangesets" `
+    Assert-Sql "SELECT (SELECT count(*) FROM databasechangelog_professional_management) = $expectedChangesets" `
         'Fresh update did not apply all reported changesets.'
 
-    $appliedBefore = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
+    $appliedBefore = Invoke-Sql 'SELECT count(*) FROM databasechangelog_professional_management'
     $secondUpdate = Invoke-Liquibase @('update') | Out-String
     if ($secondUpdate -notmatch '(?m)^\s*Run:\s+0\s*$') {
         throw 'Repeated Liquibase update did not report zero changesets.'
     }
-    $appliedAfter = Invoke-Sql 'SELECT count(*) FROM databasechangelog'
+    $appliedAfter = Invoke-Sql 'SELECT count(*) FROM databasechangelog_professional_management'
     if ($appliedAfter -ne $appliedBefore) {
         throw 'Repeated update applied additional changesets.'
     }
@@ -207,16 +207,16 @@ try {
         'Domain tables remain after complete rollback.'
     Assert-Sql "SELECT NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='professional_management')" `
         'Professional Management schema remains after complete rollback.'
-    Assert-Sql "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('public','professional_management') AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')) = 0" `
+    Assert-Sql "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('public','professional_management') AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog_professional_management','databasechangeloglock_professional_management')) = 0" `
         'Unexpected domain tables remain after complete rollback.'
-    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog) = 0' 'Liquibase changeset history remains after rollback.'
+    Assert-Sql 'SELECT (SELECT count(*) FROM databasechangelog_professional_management) = 0' 'Liquibase changeset history remains after rollback.'
 
     $reapplication = Invoke-Liquibase @('update') | Out-String
     if ($reapplication -notmatch '(?m)^\s*Run:\s+(\d+)\s*$' -or [int]$Matches[1] -ne $expectedChangesets) {
         throw 'Reapplication did not run the complete changeset set.'
     }
     Assert-Schema
-    Assert-Sql "SELECT (SELECT count(*) FROM databasechangelog) = $expectedChangesets" `
+    Assert-Sql "SELECT (SELECT count(*) FROM databasechangelog_professional_management) = $expectedChangesets" `
         'Reapplication did not restore all changesets.'
 } catch {
     $failure = $_
