@@ -386,7 +386,7 @@ try {
     # DEC-005 with data: professionals registered while the catalog existed keep
     # their profile, become general practitioners and lose only the specialty.
     $generalPractice = $databases[7]; NewDb $generalPractice; L $generalPractice @('update-count', '--count', '27')
-    $pediatricsId = Scalar $generalPractice "SELECT id FROM professional_management.specialty WHERE name='Pediatría'"
+    $pediatricsId = Scalar $generalPractice "SELECT id FROM professional_management.specialty WHERE name=U&'Pediatr\00EDa'"
     P $generalPractice "INSERT INTO professional_management.professional(identity_user_id,license_number,specialty_id,years_experience,professional_type,status) VALUES (900000201,'TEST-DEC-005-SPECIALIST',$pediatricsId,4,'SPECIALIST','INACTIVE'),(900000202,'TEST-DEC-005-UNCLASSIFIED',$pediatricsId,1,NULL,'ACTIVE')"
     L $generalPractice @('update')
     GeneralPractice $generalPractice
