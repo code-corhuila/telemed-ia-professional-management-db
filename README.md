@@ -10,8 +10,8 @@ documentation and governance live in [`telemed-ia-docs`](https://github.com/code
 ## Database scope
 
 This repository contains the PostgreSQL schema, Liquibase migrations/changelog, initial seed data,
-and database tests for the Professional Management bounded context. It contains the `specialty`,
-`professional`, `specialty_seed_ownership`, and `idempotency_key` tables;
+and database tests for the Professional Management bounded context. It contains the
+`professional` and `idempotency_key` tables;
 `identity_user_id` is
 an external reference to Identity & Access and intentionally has no foreign key to a local
 `users` table.
@@ -24,11 +24,10 @@ that nothing lives in `public`.
 Each `professional` row represents a professional registered in Professional Management. The
 `status` field expresses the profile lifecycle: `ACTIVE` means the professional is active and
 available within this bounded context; `INACTIVE` means the record remains registered while the
-professional is inactive. `status` is independent of `professional_type`. A professional may
-initially be created with `professional_type` set to `NULL`; an administrator later classifies the
-profile as `GENERAL_PRACTITIONER` or `SPECIALIST`. This bounded context does not currently define
-soft deletion or normal administrator deletion of professionals. The catalog administration scope
-is `specialty`.
+professional is inactive. `status` is independent of `professional_type`. Every professional is
+a general practitioner: `professional_type` is `GENERAL_PRACTITIONER`, its default and only value,
+and there is no specialty catalog ([DEC-005](https://github.com/code-corhuila/telemed-ia-docs/blob/main/09-microservices/services/04-professional-service/decisions.md)). This bounded context does not currently define
+soft deletion or normal administrator deletion of professionals.
 
 The `specialty` and `professional` tables were created as `specialties` and `professionals` by the
 frozen changesets `001` and `003`. Changeset `ddl-alter-012` renames them to the singular required
@@ -93,7 +92,14 @@ The actual application order is `ddl-schemas-001` → `001` → `001a` → `002`
 `ddl-alter-011` → `ddl-tables-004` → `ddl-alter-009` → `ddl-alter-012` →
 `ddl-alter-013` → `ddl-alter-014` → `ddl-alter-015` → `ddl-alter-016` → `ddl-alter-017` →
 `ddl-alter-018` → `ddl-indexes-001` → `ddl-indexes-002` → `ddl-indexes-003` →
-`001-create-roles` → `001-grants` → `dcl-grants-002`. That is 27 changesets.
+`001-create-roles` → `001-grants` → `dcl-grants-002` → `ddl-alter-019` → `ddl-alter-020` →
+`ddl-alter-021`. That is 30 changesets.
+
+`ddl-alter-019`, `ddl-alter-020` and `ddl-alter-021` (DEC-005) are registered in
+`01_ddl/04_alter/changelog-post-dcl.yaml`, included by the master changelog after the DCL
+phase. Every environment already holds the 27 earlier changesets, so these run after the grants
+there; listing them after the DCL gives a fresh database the same order. The default privileges of
+`001-grants` keep covering the tables they change.
 
 `ddl-alter-012`, `ddl-alter-013`, `ddl-alter-014`, `ddl-alter-015`, `ddl-alter-016`,
 `ddl-alter-017`, and `ddl-alter-018` are registered in
@@ -233,17 +239,13 @@ See [`05_rollbacks/README.md`](05_rollbacks/README.md) for details.
 4. Verifies no domain tables remain in `public`.
 5. `liquibase update` — reapplies the full set.
 
-## Specialty lifecycle and delete policy
+## Specialty catalog (removed)
 
-An administrator may create and edit specialties. An administrator may delete a specialty only when no professionals are associated with it.
-This is a hard delete, not a soft delete. If professionals reference the specialty, PostgreSQL
-rejects the deletion through the `professional.specialty_id -> specialty.id` foreign key.
-The FK explicitly uses `ON DELETE RESTRICT`; deleting a specialty can never delete professionals
-automatically. The seed ownership FK uses `ON DELETE CASCADE` only to remove its metadata row when
-an unused specialty is deleted; seed rollback then has no ownership record for that row and cannot
-delete a later administrator-created specialty with the same name.
-
-This repository does not implement an API delete operation.
+[DEC-005](https://github.com/code-corhuila/telemed-ia-docs/blob/main/09-microservices/services/04-professional-service/decisions.md): every professional is a general practitioner and there is no specialty
+catalog. `ddl-alter-019` drops `professional.specialty_id` and `ddl-alter-020` drops `specialty` and
+`specialty_seed_ownership`. The seed changesets `002` and `004` stay in the history (rule 12). The
+rollback of `ddl-alter-020` re-creates the catalog with its seven seeds and ledger, and the rollback
+of `ddl-alter-019` assigns Medicina General to every professional, so the full rollback still works.
 
 ## Idempotency
 
@@ -365,17 +367,13 @@ the schema objects is documented below.
 
 | Requirement | Schema object | Changeset |
 |---|---|---|
-| Administer the medical specialty catalog | Table `specialty` | `001-create-specialties` (renamed by `ddl-alter-012`) |
-| Initial catalog with seven specialties | Seed rows in `specialty` | `002-seed-specialties`, `004-seed-additional-specialties` |
 | Register healthcare professionals | Table `professional` | `003-create-professionals` (renamed by `ddl-alter-012`) |
-| Classify professionals as general practitioner or specialist | `professional_type` column with CHECK | `006-add-professional-type-and-status` |
+| Every professional is a general practitioner (DEC-005) | `professional_type` `NOT NULL DEFAULT 'GENERAL_PRACTITIONER'` with a one-value CHECK; no specialty catalog | `006-add-professional-type-and-status`, `ddl-alter-019`, `ddl-alter-020`, `ddl-alter-021` |
 | Professional lifecycle status within Professional Management | `status` column with CHECK | `006-add-professional-type-and-status` |
-| Delete a specialty only when unreferenced | FK `fk_professional_specialty` `ON DELETE RESTRICT` | `003-create-professionals`, re-declared by `ddl-alter-013` and validated by `ddl-alter-014` |
-| Seed data that can be rolled back without affecting administrator rows | Table `specialty_seed_ownership` | `001a-create-specialty-seed-ownership`, `005-cascade-deleted-specialty-ownership`, FK re-declared by `ddl-alter-015` and validated by `ddl-alter-016` |
 | Idempotent HTTP creation of professionals | Table `idempotency_key` | `ddl-tables-004`, FK re-declared by `ddl-alter-017` and validated by `ddl-alter-018` |
 | Detect a retry with the same key but different body | Column `idempotency_key.request_hash` | `ddl-alter-009` |
 
-**Status:** all requirements are implemented in the 27 changesets of this
+**Status:** all requirements are implemented in the 30 changesets of this
 repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONARY.md).
 
 ## Historical commit message debt
