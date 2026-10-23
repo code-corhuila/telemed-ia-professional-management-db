@@ -42,38 +42,14 @@ source of truth and this document reflects their current state.
 
 ---
 
-## Table: `professional_management.specialty`
+## Removed: specialty catalog
 
-**Purpose:** Catalog of medical specialties administered by Professional
-Management. Reference data used by `professional.specialty_id`.
-
-**Naming history:** this table was created as `specialties` by the frozen changeset
-`001-create-specialties` and renamed to the singular `specialty` by
-`ddl-alter-012`, to satisfy Anexo A rule 1. The applied changesets were not edited
-(database standard, rule 12); the rename is a new migration.
-
-| Column | Type | Nullable | Default | Meaning |
-|---|---|---|---|---|
-| `id` | `bigint` (BIGSERIAL) | No | nextval | Primary key. |
-| `name` | `text` | No | — | Specialty name. Unique across the catalog. |
-| `description` | `text` | Yes | — | Optional human-readable description. |
-
-**Constraints:**
-
-| Name | Type | Definition |
-|---|---|---|
-| `pk_specialties` | Primary key | `(id)` |
-| `uq_specialties_name` | Unique | `(name)` |
-| `chk_specialties_name_length` | Check | `char_length(name) <= 100` |
-| `chk_specialties_description_length` | Check | `description IS NULL OR char_length(description) <= 500` |
-
-**Indexes:** none explicit besides the implicit ones created by the primary
-key and the unique constraint.
-
-**Seeded values (initial catalog):** seven specialties inserted by the seed
-changesets `002-seed-specialties` and `004-seed-additional-specialties`:
-Medicina General, Pediatría, Dermatología, Cardiología, Neurología,
-Ginecología, Ortopedia.
+[DEC-005](https://github.com/code-corhuila/telemed-ia-docs/blob/main/09-microservices/services/04-professional-service/decisions.md) (2026-10-23): every professional is a general practitioner and
+there is no specialty catalog. `ddl-alter-019` drops `professional.specialty_id`
+with `fk_professional_specialty` and `idx_professional_specialty_id`;
+`ddl-alter-020` drops `specialty` and `specialty_seed_ownership`. The changesets
+that created them stay in the history (rule 12), and the rollback of
+`ddl-alter-020` re-creates both tables with the seven seeds.
 
 ---
 
@@ -92,9 +68,8 @@ professional.
 | `id` | `bigint` (BIGSERIAL) | No | nextval | Primary key. |
 | `identity_user_id` | `bigint` | No | — | External reference to the Identity & Access account. No cross-database foreign key. Unique. |
 | `license_number` | `text` | No | — | Professional license number. Unique. |
-| `specialty_id` | `bigint` | No | — | Foreign key to `specialty.id`. |
 | `years_experience` | `integer` | No | `0` | Years of professional experience. |
-| `professional_type` | `text` | Yes | — | Domain classification. `NULL` during the registration-to-administration transition. |
+| `professional_type` | `text` | No | `'GENERAL_PRACTITIONER'` | Domain classification. Every professional is a general practitioner (DEC-005). |
 | `status` | `text` | No | `'ACTIVE'` | Profile lifecycle status within Professional Management. |
 
 **Constraints:**
@@ -104,16 +79,14 @@ professional.
 | `pk_professionals` | Primary key | `(id)` |
 | `uq_professionals_identity_user_id` | Unique | `(identity_user_id)` |
 | `uq_professionals_license_number` | Unique | `(license_number)` |
-| `fk_professional_specialty` | Foreign key | `specialty_id` → `specialty.id` `ON DELETE RESTRICT` |
 | `chk_professionals_years_experience_nonnegative` | Check | `years_experience >= 0` |
-| `chk_professionals_professional_type` | Check | `professional_type IN ('GENERAL_PRACTITIONER','SPECIALIST')` |
+| `chk_professionals_professional_type` | Check | `professional_type = 'GENERAL_PRACTITIONER'` (`ddl-alter-021`) |
 | `chk_professionals_status` | Check | `status IN ('ACTIVE','INACTIVE')` |
 | `chk_professionals_license_number_length` | Check | `char_length(license_number) <= 80` |
 | `chk_professionals_professional_type_length` | Check | `professional_type IS NULL OR char_length(professional_type) <= 30` |
 | `chk_professionals_status_length` | Check | `char_length(status) <= 20` |
 
-**Constraint naming:** the foreign key is the only constraint on this table whose
-name follows the singular table. `pk_professionals`, `uq_professionals_*`, and
+**Constraint naming:** `pk_professionals`, `uq_professionals_*`, and
 `chk_professionals_*` keep the historical plural `professionals` because they are
 frozen inside changesets `003` and `006` and were not renamed by `ddl-alter-012`.
 Anexo A rule 1 governs *table* names, not constraint names, and Anexo A rule 4 only
@@ -124,7 +97,6 @@ them is out of scope for this migration and is left to a separate PR.
 
 | Name | Columns | Justification |
 |---|---|---|
-| `idx_professional_specialty_id` | `(specialty_id)` | Covers the foreign-key column. |
 | `idx_professional_status` | `(status)` | Filter by lifecycle status. |
 
 **Notes:**
@@ -132,42 +104,11 @@ them is out of scope for this migration and is left to a separate PR.
 - `identity_user_id` is an external reference to Identity & Access. It is
   intentionally NOT a foreign key: the referenced data lives in a different
   database (numeral 7.4 of the standard).
-- `professional_type` is intentionally nullable. Historical professionals
-  are not backfilled; an administrator classifies each profile after
-  registration. The CHECK constraint evaluates NULL as unknown and does not
-  reject unclassified rows.
+- `professional_type` is `GENERAL_PRACTITIONER` for every professional
+  (DEC-005). `ddl-alter-021` backfilled the rows left `NULL` by changeset 006
+  and any `SPECIALIST`, then made the column `NOT NULL` with that default.
 - `status` defaults to `ACTIVE` so inserts from the current API contract,
   which omits the field, remain compatible.
-
----
-
-## Table: `professional_management.specialty_seed_ownership`
-
-**Purpose:** Tracks which specialty rows were inserted by which seed
-changeset, so that rolling back a seed removes only the rows it created.
-Pre-existing administrator-created rows are preserved across seed rollbacks.
-
-| Column | Type | Nullable | Default | Meaning |
-|---|---|---|---|---|
-| `changeset_id` | `text` | No | — | Identifier of the seeding changeset that created the row. |
-| `specialty_id` | `bigint` | No | — | Reference to the seeded specialty. |
-
-**Constraints:**
-
-| Name | Type | Definition |
-|---|---|---|
-| `pk_specialty_seed_ownership` | Primary key | `(changeset_id, specialty_id)` |
-| `fk_specialty_seed_ownership_specialty` | Foreign key | `specialty_id` → `specialty.id` `ON DELETE CASCADE` |
-
-**Indexes:**
-
-| Name | Columns | Justification |
-|---|---|---|
-| `idx_specialty_seed_ownership_specialty_id` | `(specialty_id)` | Covers the foreign-key column. |
-
-**Notes:** the `ON DELETE CASCADE` on this FK removes only the ownership
-metadata row when an unreferenced specialty is deleted. It does NOT delete
-professionals or specialties.
 
 ---
 
@@ -265,6 +206,9 @@ same grants automatically.
 | `ddl-alter-017` | Recreates fk_idempotency_key_professional from 04_alter, added `NOT VALID` so the `ADD` takes only `SHARE UPDATE EXCLUSIVE` instead of an `ACCESS EXCLUSIVE` full-table scan; the preceding `DROP CONSTRAINT` still takes `ACCESS EXCLUSIVE` but only for a catalog update |
 | `ddl-alter-018` | `VALIDATE CONSTRAINT fk_idempotency_key_professional` under `SHARE UPDATE EXCLUSIVE`; completes the expand/contract pair |
 | `ddl-indexes-003` | Recreates idx_specialty_seed_ownership_specialty_id with CONCURRENTLY (Anexo A rule 14); between the `DROP` and the `CREATE` the column is briefly unindexed, which is harmless on the seven seeded rows |
+| `ddl-alter-019` | DEC-005: drop `professional.specialty_id`, with `fk_professional_specialty` and `idx_professional_specialty_id` |
+| `ddl-alter-020` | DEC-005: drop tables `specialty` and `specialty_seed_ownership` |
+| `ddl-alter-021` | DEC-005: `professional_type` backfilled, `NOT NULL`, default and only value `GENERAL_PRACTITIONER` |
 
 ---
 
