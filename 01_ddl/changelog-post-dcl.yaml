@@ -1,0 +1,8 @@
+databaseChangeLog:
+  # DDL appended after the DCL phase. Every environment already holds the 27
+  # earlier changesets, so a new changeset runs after the grants there; listing
+  # it here gives a fresh database the same order. The grants still cover the
+  # changed tables through the default privileges of 001-grants.
+  - include:
+      file: 04_alter/changelog-post-dcl.yaml
+      relativeToChangelogFile: true

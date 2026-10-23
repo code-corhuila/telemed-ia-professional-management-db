@@ -1,0 +1,42 @@
+databaseChangeLog:
+  # DEC-005 (telemed-ia-docs, 04-professional-service/decisions.md): every
+  # professional is a general practitioner and there is no specialty catalog.
+  - changeSet:
+      id: ddl-alter-019
+      author: telemed
+      comment: "DEC-005: drop professional.specialty_id with its foreign key and index."
+      # The rollback re-creates idx_professional_specialty_id CONCURRENTLY,
+      # which cannot run inside a transaction block.
+      runInTransaction: false
+      changes:
+        - sqlFile:
+            path: 019_drop_professional_specialty.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/019_drop_professional_specialty.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-020
+      author: telemed
+      comment: "DEC-005: drop the specialty catalog and its seed ownership ledger."
+      changes:
+        - sqlFile:
+            path: 020_drop_specialty_catalog.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/020_drop_specialty_catalog.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-021
+      author: telemed
+      comment: "DEC-005: every professional is a GENERAL_PRACTITIONER; the type is required and defaults to it."
+      changes:
+        - sqlFile:
+            path: 021_make_professionals_general_practitioners.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/021_make_professionals_general_practitioners.rollback.sql
+            relativeToChangelogFile: true
