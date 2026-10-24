@@ -93,9 +93,10 @@ The actual application order is `ddl-schemas-001` → `001` → `001a` → `002`
 `ddl-alter-013` → `ddl-alter-014` → `ddl-alter-015` → `ddl-alter-016` → `ddl-alter-017` →
 `ddl-alter-018` → `ddl-indexes-001` → `ddl-indexes-002` → `ddl-indexes-003` →
 `001-create-roles` → `001-grants` → `dcl-grants-002` → `ddl-alter-019` → `ddl-alter-020` →
-`ddl-alter-021`. That is 30 changesets.
+`ddl-alter-021` → `ddl-alter-022` → `ddl-alter-023` → `ddl-alter-024` → `ddl-alter-025`. That is
+34 changesets.
 
-`ddl-alter-019`, `ddl-alter-020` and `ddl-alter-021` (DEC-005) are registered in
+`ddl-alter-019` to `ddl-alter-025` (DEC-005 and DEC-006) are registered in
 `01_ddl/04_alter/changelog-post-dcl.yaml`, included by the master changelog after the DCL
 phase. Every environment already holds the 27 earlier changesets, so these run after the grants
 there; listing them after the DCL gives a fresh database the same order. The default privileges of
@@ -239,6 +240,23 @@ See [`05_rollbacks/README.md`](05_rollbacks/README.md) for details.
 4. Verifies no domain tables remain in `public`.
 5. `liquibase update` — reapplies the full set.
 
+## UUID identifiers
+
+[DEC-006](https://github.com/code-corhuila/telemed-ia-docs/blob/main/09-microservices/services/04-professional-service/decisions.md): `professional.id`, `professional.identity_user_id` and
+`idempotency_key.professional_id` are UUID, as Anexo C and the shared contract require, and new
+professionals get `gen_random_uuid()`. The change is an expand/contract sequence:
+
+1. `ddl-alter-022` adds the UUID columns next to the bigint ones and fills them. Each number `n`
+   becomes `00000000-0000-0000-0000-<n in 12 hex digits>`, so every idempotency key keeps its
+   professional and the mapping can be reversed.
+2. `ddl-alter-023` indexes the UUID idempotency column `CONCURRENTLY`.
+3. `ddl-alter-024` swaps the UUID columns in under the same column and constraint names; the
+   foreign key is re-added `NOT VALID`.
+4. `ddl-alter-025` validates it.
+
+The rollback of `ddl-alter-024` restores the numbers, re-creates `professionals_id_seq` after the
+highest one, and refuses while a professional holds a generated UUID with no numeric equivalent.
+
 ## Specialty catalog (removed)
 
 [DEC-005](https://github.com/code-corhuila/telemed-ia-docs/blob/main/09-microservices/services/04-professional-service/decisions.md): every professional is a general practitioner and there is no specialty
@@ -371,9 +389,10 @@ the schema objects is documented below.
 | Every professional is a general practitioner (DEC-005) | `professional_type` `NOT NULL DEFAULT 'GENERAL_PRACTITIONER'` with a one-value CHECK; no specialty catalog | `006-add-professional-type-and-status`, `ddl-alter-019`, `ddl-alter-020`, `ddl-alter-021` |
 | Professional lifecycle status within Professional Management | `status` column with CHECK | `006-add-professional-type-and-status` |
 | Idempotent HTTP creation of professionals | Table `idempotency_key` | `ddl-tables-004`, FK re-declared by `ddl-alter-017` and validated by `ddl-alter-018` |
+| UUID identifiers (Anexo C, DEC-006) | `professional.id`, `professional.identity_user_id`, `idempotency_key.professional_id` | `ddl-alter-022` to `ddl-alter-025` |
 | Detect a retry with the same key but different body | Column `idempotency_key.request_hash` | `ddl-alter-009` |
 
-**Status:** all requirements are implemented in the 30 changesets of this
+**Status:** all requirements are implemented in the 34 changesets of this
 repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONARY.md).
 
 ## Historical commit message debt
