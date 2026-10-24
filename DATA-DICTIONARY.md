@@ -65,8 +65,8 @@ professional.
 
 | Column | Type | Nullable | Default | Meaning |
 |---|---|---|---|---|
-| `id` | `bigint` (BIGSERIAL) | No | nextval | Primary key. |
-| `identity_user_id` | `bigint` | No | — | External reference to the Identity & Access account. No cross-database foreign key. Unique. |
+| `id` | `uuid` | No | `gen_random_uuid()` | Primary key (DEC-006). |
+| `identity_user_id` | `uuid` | No | — | External reference to the Identity & Access account, which identifies users with UUID. No cross-database foreign key. Unique. |
 | `license_number` | `text` | No | — | Professional license number. Unique. |
 | `years_experience` | `integer` | No | `0` | Years of professional experience. |
 | `professional_type` | `text` | No | `'GENERAL_PRACTITIONER'` | Domain classification. Every professional is a general practitioner (DEC-005). |
@@ -104,6 +104,11 @@ them is out of scope for this migration and is left to a separate PR.
 - `identity_user_id` is an external reference to Identity & Access. It is
   intentionally NOT a foreign key: the referenced data lives in a different
   database (numeral 7.4 of the standard).
+- Identifiers are UUID (DEC-006). Rows created before `ddl-alter-022` keep a
+  reversible mapping of their old number: `n` becomes
+  `00000000-0000-0000-0000-<n in 12 hex digits>`. The rollback of
+  `ddl-alter-024` restores the numbers and refuses while a generated UUID
+  without that form exists.
 - `professional_type` is `GENERAL_PRACTITIONER` for every professional
   (DEC-005). `ddl-alter-021` backfilled the rows left `NULL` by changeset 006
   and any `SPECIALIST`, then made the column `NOT NULL` with that default.
@@ -122,7 +127,7 @@ instead of creating a new one.
 | Column | Type | Nullable | Default | Meaning |
 |---|---|---|---|---|
 | `key` | `text` | No | — | The idempotency key from the HTTP request. Primary key. |
-| `professional_id` | `bigint` | No | — | Foreign key to the professional created by this request. |
+| `professional_id` | `uuid` | No | — | Foreign key to the professional created by this request. |
 | `created_at` | `timestamptz` | No | `now()` | Row creation timestamp. |
 | `request_hash` | `text` | Yes | — | Hash of the request body. Used to detect a retry with the same key but a different payload. |
 
@@ -209,6 +214,10 @@ same grants automatically.
 | `ddl-alter-019` | DEC-005: drop `professional.specialty_id`, with `fk_professional_specialty` and `idx_professional_specialty_id` |
 | `ddl-alter-020` | DEC-005: drop tables `specialty` and `specialty_seed_ownership` |
 | `ddl-alter-021` | DEC-005: `professional_type` backfilled, `NOT NULL`, default and only value `GENERAL_PRACTITIONER` |
+| `ddl-alter-022` | DEC-006 expand: columns `professional.id_uuid`, `professional.identity_user_id_uuid`, `idempotency_key.professional_id_uuid`, filled with the reversible mapping |
+| `ddl-alter-023` | DEC-006: index `idx_idempotency_key_professional_id_uuid` with `CONCURRENTLY` |
+| `ddl-alter-024` | DEC-006 contract: the UUID columns replace the bigint ones (same names and constraint names); `professionals_id_seq` dropped; `id` defaults to `gen_random_uuid()`; FK re-added `NOT VALID` |
+| `ddl-alter-025` | DEC-006: `VALIDATE CONSTRAINT fk_idempotency_key_professional` |
 
 ---
 
