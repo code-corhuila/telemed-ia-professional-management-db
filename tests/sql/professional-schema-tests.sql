@@ -4,8 +4,6 @@ BEGIN;
 
 DO $$
 DECLARE
-    actual_count INTEGER;
-    protected_specialty_id BIGINT;
     test_professional_id BIGINT;
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -23,10 +21,14 @@ BEGIN
           ))
     THEN RAISE EXCEPTION 'Unexpected public tables exist'; END IF;
 
-    IF to_regclass('professional_management.specialty') IS NULL
-       OR to_regclass('professional_management.professional') IS NULL
-       OR to_regclass('professional_management.specialty_seed_ownership') IS NULL
-    THEN RAISE EXCEPTION 'Expected specialty and professional tables'; END IF;
+    IF to_regclass('professional_management.professional') IS NULL
+    THEN RAISE EXCEPTION 'Expected the professional table'; END IF;
+
+    -- DEC-005: every professional is a general practitioner; ddl-alter-020 drops
+    -- the specialty catalog and its seed ownership ledger.
+    IF to_regclass('professional_management.specialty') IS NOT NULL
+       OR to_regclass('professional_management.specialty_seed_ownership') IS NOT NULL
+    THEN RAISE EXCEPTION 'The specialty catalog must be gone after ddl-alter-020 (DEC-005)'; END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'professional_management_reader' AND NOT rolcanlogin) THEN
         RAISE EXCEPTION 'professional_management_reader NOLOGIN role is missing';
@@ -70,30 +72,18 @@ BEGIN
     EXECUTE 'DROP SEQUENCE professional_management.grant_default_probe_seq';
     EXECUTE 'DROP TABLE professional_management.grant_default_probe';
 
-    SELECT COUNT(*) INTO actual_count
-    FROM professional_management.specialty
-    WHERE (name, description) IN (
-        ('Medicina General', 'Atención médica general y orientación inicial.'),
-        ('Pediatría', 'Atención integral de población pediátrica.'),
-        ('Dermatología', 'Atención de enfermedades de piel, cabello y uñas.'),
-        ('Cardiología', 'Atención de enfermedades cardiovasculares.'),
-        ('Neurología', 'Atención de enfermedades y trastornos del sistema nervioso.'),
-        ('Ginecología', 'Atención de la salud del sistema reproductivo femenino.'),
-        ('Ortopedia', 'Atención de enfermedades y lesiones del sistema musculoesquelético.')
-    );
-    IF actual_count <> 7 OR (SELECT COUNT(*) FROM professional_management.specialty) <> 7
-    THEN RAISE EXCEPTION 'Expected exactly seven specialty seeds'; END IF;
-
-    IF (SELECT COUNT(*) FROM information_schema.columns
+    IF EXISTS (SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'professional_management' AND table_name = 'professional'
-          AND column_name = 'specialty_id' AND is_nullable = 'NO') <> 1
-    THEN RAISE EXCEPTION 'Expected professional.specialty_id to be NOT NULL'; END IF;
+          AND column_name = 'specialty_id')
+    THEN RAISE EXCEPTION 'professional.specialty_id must be gone after ddl-alter-019 (DEC-005)'; END IF;
 
+    -- ddl-alter-021: professional_type is required and defaults to the only value.
     IF (SELECT COUNT(*) FROM information_schema.columns
         WHERE table_schema = 'professional_management' AND table_name = 'professional'
           AND column_name = 'professional_type' AND data_type = 'text'
-          AND is_nullable = 'YES') <> 1
-    THEN RAISE EXCEPTION 'Expected nullable professional.professional_type text'; END IF;
+          AND is_nullable = 'NO'
+          AND column_default = '''GENERAL_PRACTITIONER''::text') <> 1
+    THEN RAISE EXCEPTION 'Expected professional.professional_type text NOT NULL DEFAULT GENERAL_PRACTITIONER'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
         WHERE conrelid = 'professional_management.professional'::regclass
@@ -128,17 +118,15 @@ BEGIN
 
     IF (SELECT COUNT(*) FROM pg_constraint
         WHERE conrelid = 'professional_management.professional'::regclass
-          AND conname = 'chk_professionals_professional_type' AND contype = 'c' AND convalidated) <> 1
-    THEN RAISE EXCEPTION 'Expected validated professional_type CHECK constraint'; END IF;
+          AND conname = 'chk_professionals_professional_type' AND contype = 'c' AND convalidated
+          AND pg_get_constraintdef(oid) ILIKE '%GENERAL_PRACTITIONER%'
+          AND pg_get_constraintdef(oid) NOT ILIKE '%SPECIALIST%') <> 1
+    THEN RAISE EXCEPTION 'Expected a validated professional_type CHECK that allows only GENERAL_PRACTITIONER'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
         WHERE conrelid = 'professional_management.professional'::regclass
           AND conname = 'chk_professionals_status' AND contype = 'c' AND convalidated) <> 1
     THEN RAISE EXCEPTION 'Expected validated status CHECK constraint'; END IF;
-
-    IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conname = 'uq_specialties_name' AND contype = 'u') <> 1
-    THEN RAISE EXCEPTION 'Expected uq_specialties_name'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_constraint
         WHERE conname = 'uq_professionals_identity_user_id' AND contype = 'u') <> 1
@@ -148,31 +136,16 @@ BEGIN
         WHERE conname = 'uq_professionals_license_number' AND contype = 'u') <> 1
     THEN RAISE EXCEPTION 'Expected uq_professionals_license_number'; END IF;
 
+    -- With the catalog gone, professional references no other table; its
+    -- account reference to Identity & Access is external and has no FK.
     IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.professional'::regclass
-          AND conname = 'fk_professional_specialty'
-          AND contype = 'f'
-          AND convalidated = true
-          AND confrelid = 'professional_management.specialty'::regclass
-          AND pg_get_constraintdef(oid) ILIKE '%ON DELETE RESTRICT%') <> 1
-    THEN RAISE EXCEPTION 'Expected validated fk_professional_specialty with ON DELETE RESTRICT'; END IF;
-
-    -- ddl-alter-013 drops the historical plural constraint, so it must no longer
-    -- exist anywhere after the full update. This catches a partially applied
-    -- migration in which the new FK was added but the old one was left behind.
-    IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conname = 'fk_professionals_specialty') <> 0
-    THEN RAISE EXCEPTION 'Historical fk_professionals_specialty must be gone after ddl-alter-013'; END IF;
-
-    IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.professional'::regclass AND contype = 'f'
-          AND confrelid <> 'professional_management.specialty'::regclass) <> 0
-    THEN RAISE EXCEPTION 'Unexpected cross-database foreign key'; END IF;
+        WHERE conrelid = 'professional_management.professional'::regclass AND contype = 'f') <> 0
+    THEN RAISE EXCEPTION 'professional must not have foreign keys after ddl-alter-019'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_indexes
         WHERE schemaname = 'professional_management' AND tablename = 'professional'
-          AND indexname = 'idx_professional_specialty_id') <> 1
-    THEN RAISE EXCEPTION 'Expected specialty_id index'; END IF;
+          AND indexname = 'idx_professional_specialty_id') <> 0
+    THEN RAISE EXCEPTION 'The specialty_id index must be gone with its column'; END IF;
 
     IF (SELECT COUNT(*) FROM pg_index i
         JOIN pg_attribute a ON a.attrelid = i.indrelid
@@ -185,63 +158,26 @@ BEGIN
              AND indexdef ILIKE '%(status)%') <> 1
     THEN RAISE EXCEPTION 'Expected exactly one status index named idx_professional_status'; END IF;
 
-    IF (SELECT COUNT(*) FROM pg_indexes
-        WHERE schemaname = 'professional_management' AND tablename = 'specialty_seed_ownership'
-          AND indexname = 'idx_specialty_seed_ownership_specialty_id'
-          AND indexdef ILIKE '%(specialty_id)%') <> 1
-    THEN RAISE EXCEPTION 'Expected specialty_seed_ownership specialty_id index'; END IF;
-
-    IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.specialty_seed_ownership'::regclass
-          AND conname = 'fk_specialty_seed_ownership_specialty'
-          AND contype = 'f'
-          AND confdeltype = 'c') <> 1
-    THEN RAISE EXCEPTION 'Expected ownership FK with ON DELETE CASCADE'; END IF;
-
-    -- ddl-alter-015 re-declares this FK from 04_alter with NOT VALID and
-    -- ddl-alter-016 validates it. convalidated = false would mean the expand
-    -- half ran without its contract half, leaving existing rows unchecked.
-    IF (SELECT COUNT(*) FROM pg_constraint
-        WHERE conrelid = 'professional_management.specialty_seed_ownership'::regclass
-          AND conname = 'fk_specialty_seed_ownership_specialty'
-          AND contype = 'f'
-          AND convalidated = true
-          AND confrelid = 'professional_management.specialty'::regclass
-          AND pg_get_constraintdef(oid) ILIKE '%ON DELETE CASCADE%') <> 1
-    THEN RAISE EXCEPTION 'Expected validated fk_specialty_seed_ownership_specialty with ON DELETE CASCADE'; END IF;
-
     -- The UNIQUE constraints renamed by ddl-alter-010 must still reject
     -- duplicates. Each block raises a plain exception when the insert is
     -- wrongly accepted; only unique_violation is swallowed, so an accepted
     -- duplicate fails the run instead of passing silently.
-    BEGIN
-        INSERT INTO professional_management.specialty (name, description)
-        VALUES ('Medicina General', 'dup');
-        RAISE EXCEPTION 'Duplicate specialty name should be rejected';
-    EXCEPTION WHEN unique_violation THEN NULL;
-    END;
-
-    -- The two professional duplicates need a stored row to collide with, so
-    -- the baseline professional is created outside the assertion block.
     INSERT INTO professional_management.professional
-        (identity_user_id, license_number, specialty_id, years_experience)
-    SELECT 999999991, 'DUP-LICENSE', id, 0
-    FROM professional_management.specialty WHERE name = 'Pediatría';
+        (identity_user_id, license_number, years_experience)
+    VALUES (999999991, 'DUP-LICENSE', 0);
 
     BEGIN
         INSERT INTO professional_management.professional
-            (identity_user_id, license_number, specialty_id, years_experience)
-        SELECT 999999992, 'DUP-LICENSE', id, 0
-        FROM professional_management.specialty WHERE name = 'Pediatría';
+            (identity_user_id, license_number, years_experience)
+        VALUES (999999992, 'DUP-LICENSE', 0);
         RAISE EXCEPTION 'Duplicate license_number should be rejected';
     EXCEPTION WHEN unique_violation THEN NULL;
     END;
 
     BEGIN
         INSERT INTO professional_management.professional
-            (identity_user_id, license_number, specialty_id, years_experience)
-        SELECT 999999991, 'DUP-IDENTITY', id, 0
-        FROM professional_management.specialty WHERE name = 'Pediatría';
+            (identity_user_id, license_number, years_experience)
+        VALUES (999999991, 'DUP-IDENTITY', 0);
         RAISE EXCEPTION 'Duplicate identity_user_id should be rejected';
     EXCEPTION WHEN unique_violation THEN NULL;
     END;
@@ -251,68 +187,53 @@ BEGIN
                WHERE license_number = 'DUP-LICENSE' OR identity_user_id = 999999991)
     THEN RAISE EXCEPTION 'Rejected duplicates must not create a professional'; END IF;
 
-    INSERT INTO professional_management.specialty (name, description)
-    VALUES ('Prueba eliminación libre', 'Delete test');
-    DELETE FROM professional_management.specialty WHERE name = 'Prueba eliminación libre';
-    IF EXISTS (SELECT 1 FROM professional_management.specialty WHERE name = 'Prueba eliminación libre')
-    THEN RAISE EXCEPTION 'Unreferenced specialty should be deletable'; END IF;
-
-    INSERT INTO professional_management.specialty (name, description)
-    VALUES ('Prueba eliminación protegida', 'Delete protection test')
-    RETURNING id INTO protected_specialty_id;
+    -- DEC-005: an insert that omits the lifecycle fields registers an ACTIVE
+    -- general practitioner, the profile the API creates.
     INSERT INTO professional_management.professional
-        (identity_user_id, license_number, specialty_id, years_experience, professional_type, status)
-    VALUES (900000001, 'TEST-SAFE-DELETE-001', protected_specialty_id, 0,
-            'GENERAL_PRACTITIONER', 'ACTIVE');
-
-    INSERT INTO professional_management.professional
-        (identity_user_id, license_number, specialty_id, years_experience)
-    VALUES (900000002, 'TEST-API-INSERT-001', protected_specialty_id, 0);
+        (identity_user_id, license_number, years_experience)
+    VALUES (900000002, 'TEST-API-INSERT-001', 0);
     IF NOT EXISTS (SELECT 1 FROM professional_management.professional
                    WHERE license_number = 'TEST-API-INSERT-001'
-                     AND professional_type IS NULL AND status = 'ACTIVE')
-    THEN RAISE EXCEPTION 'API-compatible insert must default status and retain null professional_type'; END IF;
+                     AND professional_type = 'GENERAL_PRACTITIONER' AND status = 'ACTIVE')
+    THEN RAISE EXCEPTION 'An insert without lifecycle fields must default to an ACTIVE GENERAL_PRACTITIONER'; END IF;
 
-    UPDATE professional_management.professional
-    SET professional_type = 'SPECIALIST', status = 'INACTIVE'
-    WHERE license_number = 'TEST-SAFE-DELETE-001';
+    UPDATE professional_management.professional SET status = 'INACTIVE'
+    WHERE license_number = 'TEST-API-INSERT-001';
     IF NOT EXISTS (SELECT 1 FROM professional_management.professional
-                   WHERE license_number = 'TEST-SAFE-DELETE-001'
-                     AND professional_type = 'SPECIALIST' AND status = 'INACTIVE')
-    THEN RAISE EXCEPTION 'Expected the allowed professional_type and status values'; END IF;
-
-    UPDATE professional_management.professional SET professional_type = 'GENERAL_PRACTITIONER'
-    WHERE license_number = 'TEST-SAFE-DELETE-001';
+                   WHERE license_number = 'TEST-API-INSERT-001' AND status = 'INACTIVE')
+    THEN RAISE EXCEPTION 'Expected the allowed status values'; END IF;
     UPDATE professional_management.professional SET status = 'ACTIVE'
-    WHERE license_number = 'TEST-SAFE-DELETE-001';
+    WHERE license_number = 'TEST-API-INSERT-001';
+
+    BEGIN
+        UPDATE professional_management.professional SET professional_type = 'SPECIALIST'
+        WHERE license_number = 'TEST-API-INSERT-001';
+        RAISE EXCEPTION 'SPECIALIST must be rejected (DEC-005)';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+
+    BEGIN
+        UPDATE professional_management.professional SET professional_type = NULL
+        WHERE license_number = 'TEST-API-INSERT-001';
+        RAISE EXCEPTION 'A missing professional_type must be rejected';
+    EXCEPTION WHEN not_null_violation THEN NULL;
+    END;
 
     BEGIN
         UPDATE professional_management.professional SET professional_type = 'INVALID'
-        WHERE license_number = 'TEST-SAFE-DELETE-001';
+        WHERE license_number = 'TEST-API-INSERT-001';
         RAISE EXCEPTION 'Invalid professional_type should be rejected';
     EXCEPTION WHEN check_violation THEN NULL;
     END;
 
     BEGIN
         UPDATE professional_management.professional SET status = 'PENDING'
-        WHERE license_number = 'TEST-SAFE-DELETE-001';
+        WHERE license_number = 'TEST-API-INSERT-001';
         RAISE EXCEPTION 'Invalid status should be rejected';
     EXCEPTION WHEN check_violation THEN NULL;
     END;
 
-    BEGIN
-        DELETE FROM professional_management.specialty WHERE id = protected_specialty_id;
-        RAISE EXCEPTION 'Referenced specialty should not be deletable';
-    EXCEPTION WHEN foreign_key_violation THEN NULL;
-    END;
-
-    IF NOT EXISTS (SELECT 1 FROM professional_management.professional
-                   WHERE license_number = 'TEST-SAFE-DELETE-001')
-    THEN RAISE EXCEPTION 'Professional must remain after rejected delete'; END IF;
-
-    DELETE FROM professional_management.professional WHERE license_number = 'TEST-SAFE-DELETE-001';
     DELETE FROM professional_management.professional WHERE license_number = 'TEST-API-INSERT-001';
-    DELETE FROM professional_management.specialty WHERE id = protected_specialty_id;
 
     IF to_regclass('professional_management.idempotency_key') IS NULL THEN
         RAISE EXCEPTION 'Expected table professional_management.idempotency_key';
@@ -362,9 +283,8 @@ BEGIN
     -- professional_id would be refused by the NOT NULL constraint instead, and
     -- the test would pass without ever exercising chk_idempotency_key_length.
     INSERT INTO professional_management.professional
-        (identity_user_id, license_number, specialty_id, years_experience)
-    SELECT 999999999, 'TEST-IDEMP-LEN', id, 0
-    FROM professional_management.specialty WHERE name = 'Medicina General';
+        (identity_user_id, license_number, years_experience)
+    VALUES (999999999, 'TEST-IDEMP-LEN', 0);
 
     SELECT id INTO test_professional_id FROM professional_management.professional
     WHERE license_number = 'TEST-IDEMP-LEN';
