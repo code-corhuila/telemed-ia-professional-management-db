@@ -6,7 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $id = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $network = "seed-rollback-$id"
 $container = "$network-postgres"
-$kinds = @('fresh', 'full', 'collision002', 'collision004', 'fk', 'admindelete', 'transition', 'generalpractice')
+$kinds = @('fresh', 'full', 'collision002', 'collision004', 'fk', 'admindelete', 'transition', 'generalpractice', 'uuid')
 $databases = @($kinds | ForEach-Object { "seed_${_}_$id" })
 if ($databases.Count -ne $kinds.Count -or
     @($databases | Where-Object { $_ -notmatch "^seed_.+_$id$" }).Count -ne 0 -or
@@ -167,16 +167,25 @@ try {
     if (-not $ready) { throw 'Disposable PostgreSQL did not become ready.' }
 
     $fresh = $databases[0]; NewDb $fresh; L $fresh @('update'); L $fresh @('validate')
-    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-alter-010','ddl-alter-011','ddl-tables-004','ddl-alter-009','ddl-indexes-001','ddl-alter-012','ddl-alter-013','ddl-alter-014','ddl-alter-015','ddl-alter-016','ddl-alter-017','ddl-alter-018','ddl-indexes-002','ddl-indexes-003','001-create-roles','001-grants','dcl-grants-002','ddl-alter-019','ddl-alter-020','ddl-alter-021'))=30" 'Expected thirty changesets.'
+    A $fresh "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-alter-010','ddl-alter-011','ddl-tables-004','ddl-alter-009','ddl-indexes-001','ddl-alter-012','ddl-alter-013','ddl-alter-014','ddl-alter-015','ddl-alter-016','ddl-alter-017','ddl-alter-018','ddl-indexes-002','ddl-indexes-003','001-create-roles','001-grants','dcl-grants-002','ddl-alter-019','ddl-alter-020','ddl-alter-021','ddl-alter-022','ddl-alter-023','ddl-alter-024','ddl-alter-025'))=34" 'Expected thirty-four changesets.'
     GeneralPractice $fresh
     Schema $fresh
     L $fresh @('update')
-    A $fresh '(SELECT count(*) FROM databasechangelog)=30' 'Second update applied additional changesets.'
+    A $fresh '(SELECT count(*) FROM databasechangelog)=34' 'Second update applied additional changesets.'
     GeneralPractice $fresh
     Write-Host 'PASS second update is idempotent.'
 
-    # The DEC-005 changesets run after the grants, so they are the first ones
-    # to roll back.
+    # The DEC-006 and DEC-005 changesets run after the grants, so they are the
+    # first ones to roll back.
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "(SELECT count(*) FROM pg_constraint WHERE conname='fk_idempotency_key_professional' AND confdeltype='c' AND convalidated)=1" 'Rollback of ddl-alter-025 is a no-op and must keep the validated idempotency FK.'
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "(SELECT count(*) FROM information_schema.columns WHERE table_schema='professional_management' AND ((table_name='professional' AND column_name IN ('id','identity_user_id')) OR (table_name='idempotency_key' AND column_name='professional_id')) AND data_type='bigint')=3 AND (SELECT count(*) FROM information_schema.columns WHERE table_schema='professional_management' AND column_name IN ('id_uuid','identity_user_id_uuid','professional_id_uuid') AND data_type='uuid')=3 AND pg_get_serial_sequence('professional_management.professional','id') IS NOT NULL AND (SELECT count(*) FROM pg_constraint WHERE conname IN ('pk_professionals','uq_professionals_identity_user_id','fk_idempotency_key_professional'))=3" 'Rollback ddl-alter-024 must restore the bigint identifiers, their sequence and constraints, next to the expand columns.'
+    A $fresh "has_sequence_privilege('professional_management_writer', pg_get_serial_sequence('professional_management.professional','id'), 'USAGE')" 'Rollback ddl-alter-024 must leave the re-created sequence granted.'
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "(SELECT count(*) FROM pg_indexes WHERE schemaname='professional_management' AND tablename='idempotency_key' AND indexname='idx_idempotency_key_professional_id' AND indexdef ILIKE '%(professional_id)%')=1 AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='professional_management' AND indexname='idx_idempotency_key_professional_id_uuid')" 'Rollback ddl-alter-023 must leave only the bigint idempotency index.'
+    L $fresh @('rollback-count','--count','1')
+    A $fresh "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND column_name IN ('id_uuid','identity_user_id_uuid','professional_id_uuid'))" 'Rollback ddl-alter-022 must drop the expand columns.'
     L $fresh @('rollback-count','--count','1')
     A $fresh "(SELECT count(*) FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professional' AND column_name='professional_type' AND is_nullable='YES' AND column_default IS NULL)=1 AND (SELECT count(*) FROM pg_constraint WHERE conname='chk_professionals_professional_type' AND convalidated AND pg_get_constraintdef(oid) ILIKE '%SPECIALIST%')=1" 'Rollback ddl-alter-021 must restore the nullable professional_type and its two-value CHECK.'
     L $fresh @('rollback-count','--count','1')
@@ -277,13 +286,13 @@ try {
     Schema $fresh
     Write-Host 'PASS fresh apply, ownership, staged rollbacks, reapply, and schema tests.'
 
-    $full = $databases[1]; NewDb $full; L $full @('update'); L $full @('rollback-count','--count','30')
+    $full = $databases[1]; NewDb $full; L $full @('update'); L $full @('rollback-count','--count','34')
     A $full "to_regclass('public.specialties') IS NULL AND to_regclass('public.professionals') IS NULL AND to_regclass('public.specialty_seed_ownership') IS NULL AND to_regclass('professional_management.specialty') IS NULL AND to_regclass('professional_management.professional') IS NULL AND to_regclass('professional_management.specialty_seed_ownership') IS NULL" 'Full rollback left domain tables.'
     A $full "NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='professional_management')" 'Full rollback left the domain schema.'
-    A $full "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-alter-010','ddl-alter-011','ddl-tables-004','ddl-alter-009','ddl-indexes-001','ddl-alter-012','ddl-alter-013','ddl-alter-014','ddl-alter-015','ddl-alter-016','ddl-alter-017','ddl-alter-018','ddl-indexes-002','ddl-indexes-003','001-create-roles','001-grants','dcl-grants-002','ddl-alter-019','ddl-alter-020','ddl-alter-021'))=0" 'Full rollback left changeset history.'
+    A $full "(SELECT count(*) FROM databasechangelog WHERE id IN ('ddl-schemas-001','001-create-specialties','001a-create-specialty-seed-ownership','002-seed-specialties','003-create-professionals','004-seed-additional-specialties','005-cascade-deleted-specialty-ownership','006-add-professional-type-and-status','ddl-alter-007','ddl-alter-008','ddl-alter-010','ddl-alter-011','ddl-tables-004','ddl-alter-009','ddl-indexes-001','ddl-alter-012','ddl-alter-013','ddl-alter-014','ddl-alter-015','ddl-alter-016','ddl-alter-017','ddl-alter-018','ddl-indexes-002','ddl-indexes-003','001-create-roles','001-grants','dcl-grants-002','ddl-alter-019','ddl-alter-020','ddl-alter-021','ddl-alter-022','ddl-alter-023','ddl-alter-024','ddl-alter-025'))=0" 'Full rollback left changeset history.'
     L $full @('update'); GeneralPractice $full
     Schema $full
-    Write-Host 'PASS rollback-count=30, table/schema/history removal, reapply, and schema tests.'
+    Write-Host 'PASS rollback-count=34, table/schema/history removal, reapply, and schema tests.'
 
     Collision $databases[2] 'Medicina General' "'Medicina General'" '002-seed-specialties' 3 1 3
     Collision $databases[3] 'Neurología' $neurology '004-seed-additional-specialties' 2 5 4
@@ -391,11 +400,44 @@ try {
     L $generalPractice @('update')
     GeneralPractice $generalPractice
     A $generalPractice "(SELECT count(*) FROM professional_management.professional WHERE license_number IN ('TEST-DEC-005-SPECIALIST','TEST-DEC-005-UNCLASSIFIED') AND professional_type='GENERAL_PRACTITIONER')=2 AND EXISTS (SELECT 1 FROM professional_management.professional WHERE license_number='TEST-DEC-005-SPECIALIST' AND years_experience=4 AND status='INACTIVE')" 'DEC-005 must keep every professional and make it a general practitioner.'
-    L $generalPractice @('rollback-count', '--count', '3')
+    # Rolls back DEC-006 (four changesets) and DEC-005 (three).
+    L $generalPractice @('rollback-count', '--count', '7')
     $restoredGeneralId = Scalar $generalPractice "SELECT id FROM professional_management.specialty WHERE name='Medicina General'"
     A $generalPractice "(SELECT count(*) FROM professional_management.professional WHERE license_number IN ('TEST-DEC-005-SPECIALIST','TEST-DEC-005-UNCLASSIFIED') AND specialty_id=$restoredGeneralId)=2" 'Rollback of DEC-005 must assign the restored Medicina General to every professional.'
     Seven $generalPractice
+    A $generalPractice "(SELECT count(*) FROM professional_management.professional WHERE identity_user_id IN (900000201,900000202))=2" 'Rolling back DEC-006 must restore the original numeric account references.'
     Write-Host 'PASS DEC-005 keeps professionals as general practitioners and rolls back to the seeded catalog.'
+
+    # DEC-006 with data: identifiers become UUID with a reversible mapping, a new
+    # professional gets a generated UUID, and the rollback refuses to invent a
+    # number for a real UUID.
+    $uuid = $databases[8]; NewDb $uuid; L $uuid @('update-count', '--count', '30')
+    $oldId = Scalar $uuid "INSERT INTO professional_management.professional(identity_user_id,license_number,years_experience) VALUES (900000301,'TEST-DEC-006-001',2) RETURNING id"
+    P $uuid "INSERT INTO professional_management.idempotency_key(key,professional_id,request_hash) VALUES ('dec-006-key-0001',$oldId,'hash')"
+    L $uuid @('update')
+    $mapped = "('00000000-0000-0000-0000-' || lpad(to_hex($oldId::bigint), 12, '0'))::uuid"
+    A $uuid "EXISTS (SELECT 1 FROM professional_management.professional WHERE id=$mapped AND identity_user_id=('00000000-0000-0000-0000-' || lpad(to_hex(900000301), 12, '0'))::uuid AND license_number='TEST-DEC-006-001' AND years_experience=2)" 'DEC-006 must map the bigint identifiers to UUID without losing the profile.'
+    A $uuid "EXISTS (SELECT 1 FROM professional_management.idempotency_key WHERE key='dec-006-key-0001' AND professional_id=$mapped AND request_hash='hash')" 'DEC-006 must keep each idempotency key on its professional.'
+    P $uuid "INSERT INTO professional_management.professional(identity_user_id,license_number,years_experience) VALUES ('b0000000-0000-4000-8000-000000000301','TEST-DEC-006-002',0)"
+    A $uuid "(SELECT count(*) FROM professional_management.professional WHERE license_number='TEST-DEC-006-002' AND id IS NOT NULL AND id::text NOT LIKE '00000000-0000-0000-0000-%')=1" 'A new professional must get a generated UUID.'
+    $rollbackPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $rollbackFailure = & docker run --rm --network $network --workdir /workspace --mount "type=bind,source=$root,target=/workspace,readonly" `
+            liquibase/liquibase:4.31 "--url=jdbc:postgresql://${container}:5432/$uuid" --username=test_user "--password=$password" `
+            --changelog-file=changelog/changelog-master.yaml rollback-count --count 2 2>&1
+        $rollbackExitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $rollbackPreference }
+    if ($rollbackExitCode -eq 0 -or ($rollbackFailure -join "`n") -notmatch 'Rollback ddl-alter-024 refused') {
+        throw 'Rollback ddl-alter-024 must refuse while a UUID has no numeric equivalent.'
+    }
+    A $uuid "(SELECT count(*) FROM professional_management.professional)=2 AND (SELECT data_type FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professional' AND column_name='id')='uuid'" 'A refused rollback must leave the UUID schema and its rows.'
+    P $uuid "DELETE FROM professional_management.professional WHERE license_number='TEST-DEC-006-002'"
+    L $uuid @('rollback-count', '--count', '4')
+    A $uuid "EXISTS (SELECT 1 FROM professional_management.professional WHERE id=$oldId AND identity_user_id=900000301) AND EXISTS (SELECT 1 FROM professional_management.idempotency_key WHERE key='dec-006-key-0001' AND professional_id=$oldId)" 'Rollback of DEC-006 must restore the original bigint identifiers.'
+    $nextId = Scalar $uuid "INSERT INTO professional_management.professional(identity_user_id,license_number,years_experience) VALUES (900000302,'TEST-DEC-006-003',0) RETURNING id"
+    if ($nextId -le $oldId) { throw 'The re-created sequence must continue after the highest restored id.' }
+    Write-Host 'PASS DEC-006 maps identifiers to UUID reversibly and refuses an irreversible rollback.'
 } finally {
     $oldEap = $ErrorActionPreference
     try {
