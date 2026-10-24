@@ -416,7 +416,7 @@ try {
     P $uuid "INSERT INTO professional_management.idempotency_key(key,professional_id,request_hash) VALUES ('dec-006-key-0001',$oldId,'hash')"
     L $uuid @('update')
     $mapped = "('00000000-0000-0000-0000-' || lpad(to_hex($oldId::bigint), 12, '0'))::uuid"
-    A $uuid "EXISTS (SELECT 1 FROM professional_management.professional WHERE id=$mapped AND identity_user_id='00000000-0000-0000-0000-' || lpad(to_hex(900000301), 12, '0') AND license_number='TEST-DEC-006-001' AND years_experience=2)" 'DEC-006 must map the bigint identifiers to UUID without losing the profile.'
+    A $uuid "EXISTS (SELECT 1 FROM professional_management.professional WHERE id=$mapped AND identity_user_id=('00000000-0000-0000-0000-' || lpad(to_hex(900000301), 12, '0'))::uuid AND license_number='TEST-DEC-006-001' AND years_experience=2)" 'DEC-006 must map the bigint identifiers to UUID without losing the profile.'
     A $uuid "EXISTS (SELECT 1 FROM professional_management.idempotency_key WHERE key='dec-006-key-0001' AND professional_id=$mapped AND request_hash='hash')" 'DEC-006 must keep each idempotency key on its professional.'
     P $uuid "INSERT INTO professional_management.professional(identity_user_id,license_number,years_experience) VALUES ('b0000000-0000-4000-8000-000000000301','TEST-DEC-006-002',0)"
     A $uuid "(SELECT count(*) FROM professional_management.professional WHERE license_number='TEST-DEC-006-002' AND id IS NOT NULL AND id::text NOT LIKE '00000000-0000-0000-0000-%')=1" 'A new professional must get a generated UUID.'
