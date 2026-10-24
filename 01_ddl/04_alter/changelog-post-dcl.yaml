@@ -40,3 +40,60 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/04_alter/021_make_professionals_general_practitioners.rollback.sql
             relativeToChangelogFile: true
+  # DEC-006 (telemed-ia-docs, 04-professional-service/decisions.md): identifiers
+  # are UUID. Expand (022, 023), contract (024) and validation (025).
+  - changeSet:
+      id: ddl-alter-022
+      author: telemed
+      comment: "DEC-006 expand: add and fill the UUID identifier columns with a reversible mapping."
+      changes:
+        - sqlFile:
+            path: 022_add_uuid_identifier_columns.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/022_add_uuid_identifier_columns.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-023
+      author: telemed
+      comment: "DEC-006: index the UUID idempotency column CONCURRENTLY before the swap."
+      # CREATE and DROP INDEX CONCURRENTLY cannot run inside a transaction block.
+      runInTransaction: false
+      changes:
+        - sqlFile:
+            path: 023_index_uuid_idempotency_professional.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/023_index_uuid_idempotency_professional.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-024
+      author: telemed
+      comment: "DEC-006 contract: swap the UUID identifiers in; new professionals get gen_random_uuid()."
+      changes:
+        - sqlFile:
+            path: 024_swap_in_uuid_identifiers.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/024_swap_in_uuid_identifiers.rollback-guard.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/024_swap_in_uuid_identifiers.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-025
+      author: telemed
+      comment: "DEC-006: validate fk_idempotency_key_professional added NOT VALID by ddl-alter-024."
+      changes:
+        - sqlFile:
+            path: 025_validate_uuid_idempotency_key_fk.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/025_validate_uuid_idempotency_key_fk.rollback.sql
+            relativeToChangelogFile: true
