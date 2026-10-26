@@ -97,3 +97,31 @@ databaseChangeLog:
         - sqlFile:
             path: ../../05_rollbacks/01_ddl/04_alter/025_validate_uuid_idempotency_key_fk.rollback.sql
             relativeToChangelogFile: true
+  # DEC-010 (telemed-ia-docs, 04-professional-service/decisions.md): the list goes
+  # from the most recently registered profile to the oldest.
+  - changeSet:
+      id: ddl-alter-026
+      author: telemed
+      comment: "DEC-010: add professional.created_at, filled from the registration key or the migration time."
+      changes:
+        - sqlFile:
+            path: 026_add_professional_created_at.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/026_add_professional_created_at.rollback.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: ddl-alter-027
+      author: telemed
+      comment: "DEC-010: index the list order (created_at DESC, id DESC) CONCURRENTLY."
+      # CREATE and DROP INDEX CONCURRENTLY cannot run inside a transaction block.
+      runInTransaction: false
+      changes:
+        - sqlFile:
+            path: 027_index_professional_created_at.sql
+            relativeToChangelogFile: true
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/027_index_professional_created_at.rollback.sql
+            relativeToChangelogFile: true
