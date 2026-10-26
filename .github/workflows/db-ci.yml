@@ -6,10 +6,14 @@ on:
   push:
     branches: [develop, qa, main]
 
+permissions:
+  contents: read
+
 jobs:
   rebuild:
     name: Rebuild from empty database
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       TEST_DB_USER: test_user
       COMPOSE_PROJECT_NAME: professional-db-ci
