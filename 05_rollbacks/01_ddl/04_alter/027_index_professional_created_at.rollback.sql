@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY professional_management.idx_professional_created_at_id;
