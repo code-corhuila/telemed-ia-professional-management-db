@@ -71,6 +71,7 @@ professional.
 | `years_experience` | `integer` | No | `0` | Years of professional experience. |
 | `professional_type` | `text` | No | `'GENERAL_PRACTITIONER'` | Domain classification. Every professional is a general practitioner (DEC-005). |
 | `status` | `text` | No | `'ACTIVE'` | Profile lifecycle status within Professional Management. |
+| `created_at` | `timestamptz` | No | `now()` | When the profile was registered; orders the list (DEC-010). |
 
 **Constraints:**
 
@@ -98,6 +99,7 @@ them is out of scope for this migration and is left to a separate PR.
 | Name | Columns | Justification |
 |---|---|---|
 | `idx_professional_status` | `(status)` | Filter by lifecycle status. |
+| `idx_professional_created_at_id` | `(created_at DESC, id DESC)` | List from the most recently registered profile to the oldest (DEC-010). |
 
 **Notes:**
 
@@ -114,6 +116,9 @@ them is out of scope for this migration and is left to a separate PR.
   and any `SPECIALIST`, then made the column `NOT NULL` with that default.
 - `status` defaults to `ACTIVE` so inserts from the current API contract,
   which omits the field, remain compatible.
+- `created_at` is set by the database. `ddl-alter-026` gave existing rows the
+  `created_at` of their registration's `Idempotency-Key`, or the migration time
+  when they had none.
 
 ---
 
@@ -218,6 +223,8 @@ same grants automatically.
 | `ddl-alter-023` | DEC-006: index `idx_idempotency_key_professional_id_uuid` with `CONCURRENTLY` |
 | `ddl-alter-024` | DEC-006 contract: the UUID columns replace the bigint ones (same names and constraint names); `professionals_id_seq` dropped; `id` defaults to `gen_random_uuid()`; FK re-added `NOT VALID` |
 | `ddl-alter-025` | DEC-006: `VALIDATE CONSTRAINT fk_idempotency_key_professional` |
+| `ddl-alter-026` | DEC-010: column `professional.created_at`, backfilled, `NOT NULL DEFAULT now()` |
+| `ddl-alter-027` | DEC-010: index `idx_professional_created_at_id` with `CONCURRENTLY` |
 
 ---
 
