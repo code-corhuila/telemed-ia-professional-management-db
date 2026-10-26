@@ -6,7 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $id = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $network = "seed-rollback-$id"
 $container = "$network-postgres"
-$kinds = @('fresh', 'full', 'collision002', 'collision004', 'fk', 'admindelete', 'transition', 'generalpractice', 'uuid')
+$kinds = @('fresh', 'full', 'collision002', 'collision004', 'fk', 'admindelete', 'transition', 'generalpractice', 'uuid', 'createdat')
 $databases = @($kinds | ForEach-Object { "seed_${_}_$id" })
 if ($databases.Count -ne $kinds.Count -or
     @($databases | Where-Object { $_ -notmatch "^seed_.+_$id$" }).Count -ne 0 -or
@@ -438,6 +438,22 @@ try {
     $nextId = Scalar $uuid "INSERT INTO professional_management.professional(identity_user_id,license_number,years_experience) VALUES (900000302,'TEST-DEC-006-003',0) RETURNING id"
     if ($nextId -le $oldId) { throw 'The re-created sequence must continue after the highest restored id.' }
     Write-Host 'PASS DEC-006 maps identifiers to UUID reversibly and refuses an irreversible rollback.'
+
+    # DEC-010 with data: an existing profile takes the creation time of its
+    # registration key, one without a key takes the migration time, and the
+    # rollback removes only the column and its index.
+    $createdAt = $databases[9]; NewDb $createdAt; L $createdAt @('update-count', '--count', '34')
+    $keyed = Scalar $createdAt "INSERT INTO professional_management.professional(identity_user_id,license_number,years_experience) VALUES ('b0000000-0000-4000-8000-000000000401','TEST-DEC-010-001',1) RETURNING id"
+    P $createdAt "INSERT INTO professional_management.idempotency_key(key,professional_id,request_hash,created_at) VALUES ('dec-010-key-0001','$keyed','hash','2026-01-02T03:04:05Z')"
+    P $createdAt "INSERT INTO professional_management.professional(identity_user_id,license_number,years_experience) VALUES ('b0000000-0000-4000-8000-000000000402','TEST-DEC-010-002',0)"
+    L $createdAt @('update')
+    A $createdAt "(SELECT created_at FROM professional_management.professional WHERE license_number='TEST-DEC-010-001')='2026-01-02T03:04:05Z'::timestamptz" 'DEC-010 must take created_at from the registration key.'
+    A $createdAt "(SELECT created_at FROM professional_management.professional WHERE license_number='TEST-DEC-010-002') > '2026-01-02T03:04:05Z'::timestamptz" 'DEC-010 must give a profile without a key the migration time.'
+    L $createdAt @('rollback-count', '--count', '2')
+    A $createdAt "NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='professional_management' AND table_name='professional' AND column_name='created_at') AND to_regclass('professional_management.idx_professional_created_at_id') IS NULL AND (SELECT count(*) FROM professional_management.professional)=2" 'Rollback of DEC-010 must remove only the column and its index.'
+    L $createdAt @('update')
+    A $createdAt "(SELECT count(*) FROM professional_management.professional WHERE created_at IS NOT NULL)=2" 'DEC-010 must apply again after its rollback.'
+    Write-Host 'PASS DEC-010 records when each profile was registered and rolls back cleanly.'
 } finally {
     $oldEap = $ErrorActionPreference
     try {
