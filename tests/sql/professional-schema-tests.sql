@@ -184,6 +184,23 @@ BEGIN
              AND indexdef ILIKE '%(status)%') <> 1
     THEN RAISE EXCEPTION 'Expected exactly one status index named idx_professional_status'; END IF;
 
+    -- DEC-010: the list goes from the most recently registered profile to the
+    -- oldest, served by one index on (created_at DESC, id DESC).
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'professional_management' AND table_name = 'professional'
+          AND column_name = 'created_at' AND data_type = 'timestamp with time zone'
+          AND is_nullable = 'NO' AND column_default = 'now()')
+    THEN RAISE EXCEPTION 'Expected professional.created_at timestamptz NOT NULL DEFAULT now()'; END IF;
+
+    IF (SELECT COUNT(*) FROM pg_indexes i
+        JOIN pg_class c ON c.relname = i.indexname
+        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
+        JOIN pg_index x ON x.indexrelid = c.oid AND x.indisvalid
+        WHERE i.schemaname = 'professional_management' AND i.tablename = 'professional'
+          AND i.indexname = 'idx_professional_created_at_id'
+          AND i.indexdef ILIKE '%(created_at DESC, id DESC)%') <> 1
+    THEN RAISE EXCEPTION 'Expected a valid index idx_professional_created_at_id on (created_at DESC, id DESC)'; END IF;
+
     -- The UNIQUE constraints renamed by ddl-alter-010 must still reject
     -- duplicates. Each block raises a plain exception when the insert is
     -- wrongly accepted; only unique_violation is swallowed, so an accepted
@@ -318,6 +335,10 @@ BEGIN
     IF test_professional_id IS NULL THEN
         RAISE EXCEPTION 'Expected a test professional for the idempotency_key length checks';
     END IF;
+
+    IF (SELECT created_at FROM professional_management.professional
+        WHERE id = test_professional_id) IS DISTINCT FROM now()
+    THEN RAISE EXCEPTION 'A new professional must get created_at from the database (DEC-010)'; END IF;
 
     -- CHECK length: reject keys shorter than 8 characters
     BEGIN
