@@ -93,10 +93,10 @@ The actual application order is `ddl-schemas-001` → `001` → `001a` → `002`
 `ddl-alter-013` → `ddl-alter-014` → `ddl-alter-015` → `ddl-alter-016` → `ddl-alter-017` →
 `ddl-alter-018` → `ddl-indexes-001` → `ddl-indexes-002` → `ddl-indexes-003` →
 `001-create-roles` → `001-grants` → `dcl-grants-002` → `ddl-alter-019` → `ddl-alter-020` →
-`ddl-alter-021` → `ddl-alter-022` → `ddl-alter-023` → `ddl-alter-024` → `ddl-alter-025`. That is
-34 changesets.
+`ddl-alter-021` → `ddl-alter-022` → `ddl-alter-023` → `ddl-alter-024` → `ddl-alter-025` →
+`ddl-alter-026` → `ddl-alter-027`. That is 36 changesets.
 
-`ddl-alter-019` to `ddl-alter-025` (DEC-005 and DEC-006) are registered in
+`ddl-alter-019` to `ddl-alter-027` (DEC-005, DEC-006 and DEC-010) are registered in
 `01_ddl/04_alter/changelog-post-dcl.yaml`, included by the master changelog after the DCL
 phase. Every environment already holds the 27 earlier changesets, so these run after the grants
 there; listing them after the DCL gives a fresh database the same order. The default privileges of
@@ -257,6 +257,19 @@ professionals get `gen_random_uuid()`. The change is an expand/contract sequence
 The rollback of `ddl-alter-024` restores the numbers, re-creates `professionals_id_seq` after the
 highest one, and refuses while a professional holds a generated UUID with no numeric equivalent.
 
+## Registration time
+
+[DEC-010](https://github.com/code-corhuila/telemed-ia-docs/blob/main/09-microservices/services/04-professional-service/decisions.md): the professional list goes from the most recently
+registered profile to the oldest (Anexo C, Listados).
+
+1. `ddl-alter-026` adds `professional.created_at TIMESTAMPTZ NOT NULL DEFAULT now()`. Existing rows
+   take the `created_at` of their registration's `Idempotency-Key` when it exists, otherwise the
+   migration time.
+2. `ddl-alter-027` creates `idx_professional_created_at_id` on `(created_at DESC, id DESC)`
+   `CONCURRENTLY`, for the list order; `id` breaks ties so pages are stable.
+
+Rolling both back removes only the index and the column.
+
 ## Specialty catalog (removed)
 
 [DEC-005](https://github.com/code-corhuila/telemed-ia-docs/blob/main/09-microservices/services/04-professional-service/decisions.md): every professional is a general practitioner and there is no specialty
@@ -391,8 +404,9 @@ the schema objects is documented below.
 | Idempotent HTTP creation of professionals | Table `idempotency_key` | `ddl-tables-004`, FK re-declared by `ddl-alter-017` and validated by `ddl-alter-018` |
 | UUID identifiers (Anexo C, DEC-006) | `professional.id`, `professional.identity_user_id`, `idempotency_key.professional_id` | `ddl-alter-022` to `ddl-alter-025` |
 | Detect a retry with the same key but different body | Column `idempotency_key.request_hash` | `ddl-alter-009` |
+| List from the most recent profile to the oldest (Anexo C, DEC-010) | Column `professional.created_at`, index `idx_professional_created_at_id` | `ddl-alter-026`, `ddl-alter-027` |
 
-**Status:** all requirements are implemented in the 34 changesets of this
+**Status:** all requirements are implemented in the 36 changesets of this
 repository. The full data dictionary is in [`DATA-DICTIONARY.md`](DATA-DICTIONARY.md).
 
 ## Historical commit message debt
